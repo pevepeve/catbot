@@ -12,7 +12,7 @@ JSON_URL = 'https://subsplease.org/api/?f=schedule&tz=Europe/Moscow'
 def get_image(url, save_filename):
     rimg = requests.get(SCRAPED_SITE + url)
     img = Image.open(BytesIO(rimg.content))
-    img = img.save(MEDIA_FOLDER+save_filename+'.jpg')
+    img.save(MEDIA_FOLDER+save_filename+'.jpg')
     return save_filename+'.jpg'
 
 def get_full_url(page):
