@@ -155,3 +155,4 @@ config.py
 media/
 testdef*.py
 test.py
+*.sqlite
