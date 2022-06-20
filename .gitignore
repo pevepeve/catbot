@@ -148,7 +148,7 @@ dmypy.json
 #######################################
 # manually added
 #######################################
-*.md
+tz.md
 config/
 config.py
 *.json
