@@ -4,7 +4,6 @@ import aiofiles
 import logging
 import json
 import os
-from attr import s
 
 from sqlitedict import SqliteDict
 from aiogram import Bot, Dispatcher, executor, types
@@ -34,18 +33,27 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
 
-@dp.message_handler(commands=['start', 'help'])
+@dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
     """
     This handler will be called when user sends `/start` or `/help` command
     """
-    await message.reply('Hi!\nI\'m CatgirlBot, I send catgirls and anime schedules.')
+    await message.reply('Hi!\nI send catgirls and anime schedules.')
 
+@dp.message_handler(commands=['help'])
+async def process_help_command(message: types.Message):
+    await message.reply(f'Commands:\n'
+                        f'\\start \n'
+                        f'\\neko \n'
+                        f'\\animetoday \n',
+                        parse_mode='MarkdownV2'
+                        )
 
 @dp.message_handler(commands=['animetoday'])
 async def animetoday(message: types.Message):
-    today_anime = anime_dict[days_list[date.today().weekday()]]
-    text = f'Сегодня {days_list_ru[date.today().weekday()]}, и выходят с субтитрами аниме:\n'
+    today_num = date.today().weekday()
+    today_anime = anime_dict[days_list[today_num]]
+    text = f'Сегодня {days_list_ru[today_num]}, и выходят с субтитрами аниме:\n'
     for title_item in today_anime:
         formatted_str = f'*{title_item["title"]}* : {title_item["time"]} \n'
         text += formatted_str
