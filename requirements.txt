@@ -22,6 +22,7 @@ cffi==1.15.0
 charset-normalizer==2.0.12
 colorama==0.4.5
 coverage==6.4.1
+emoji==1.7.0
 eradicate==2.1.0
 flake8==4.0.1
 flake8-annotations-complexity==0.0.7
