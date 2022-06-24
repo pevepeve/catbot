@@ -1,18 +1,19 @@
-from random import choice
+from random import randrange
 from datetime import date
-import aiofiles
 import logging
 import json
-import os
 
 from emoji import emojize
+from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session, sessionmaker
 
 from sqlitedict import SqliteDict
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import ParseMode
 from aiogram.utils.markdown import text, bold, italic, code, pre
-from data.config.config import API_TOKEN
 
+from data.config.config import API_TOKEN, NEKODB_FILENAME
+from db_neko import NekoIds
 
 SCRAPED_SITE = 'https://subsplease.org'
 MEDIA_FOLDER = 'media/'
@@ -34,10 +35,21 @@ with open(JSON_FILE, mode='rb') as json_anime:
 # Configure logging
 logging.basicConfig(level=logging.INFO, filename='logs/bot.log')
 
+engine = create_engine(f'sqlite:///{NEKODB_FILENAME}')
+
+session_factory = sessionmaker(bind=engine)
+Session = scoped_session(session_factory)
+
 # Initialize bot and dispatcher
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
+async def get_random_nekochan():
+    count_nekos = Session.query(NekoIds.filename).count()
+    random_neko = randrange(1, count_nekos)
+    nekoid = Session.query(NekoIds.file_id).filter_by(id=random_neko).first()[0]
+    return nekoid
+    
 
 def get_keyboard_days():
     buttons = [types.InlineKeyboardButton(
@@ -101,9 +113,10 @@ async def cmd_animetoday(message: types.Message):
 
 @dp.message_handler(commands=['neko'])
 async def cmd_neko(message: types.Message):
-    random_file = choice(os.listdir(NEKODIR))
-    async with aiofiles.open(NEKODIR + random_file, mode='rb') as photo:
-        await message.reply_photo(photo, caption='Держи кошкодевочку!')
+    random_neko_id = await get_random_nekochan()
+    neko_caption = 'Держи кошкодевочку!'
+    await message.reply_photo(random_neko_id, caption=neko_caption)
+
 
 @dp.message_handler(commands=['debug'])
 async def cmd_debug(message: types.Message):
