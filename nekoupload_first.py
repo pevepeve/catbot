@@ -63,7 +63,8 @@ async def uploadMediaFiles(folder, method):
                 'Couldn\'t upload {}. Error is {}'.format(filename, e))
 
 
-loop = asyncio.get_event_loop()
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
 tasks = [
     loop.create_task(uploadMediaFiles('nekochans', bot.send_photo)),
