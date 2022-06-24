@@ -28,7 +28,7 @@ bot = Bot(token=API_TOKEN)
 MEDIA_FOLDER = './media'
 
 
-async def uploadMediaFiles(folder, method, file_attr):
+async def uploadMediaFiles(folder, method):
     folder_path = os.path.join(MEDIA_FOLDER, folder)
     for filename in os.listdir(folder_path):
         if filename.startswith('.'):
@@ -43,10 +43,7 @@ async def uploadMediaFiles(folder, method, file_attr):
         try:
             with open(os.path.join(folder_path, filename), 'rb') as file:
                 msg = await method(ADMIN_ID, file, disable_notification=True)
-                if file_attr == 'photo':
-                    file_id = msg.photo[-1].file_id
-                else:
-                    file_id = getattr(msg, file_attr).file_id
+                file_id = msg.photo[-1].file_id
                 session = Session()
                 newItem = NekoIds(file_id=file_id, filename=filename)
                 try:
@@ -69,7 +66,7 @@ async def uploadMediaFiles(folder, method, file_attr):
 loop = asyncio.get_event_loop()
 
 tasks = [
-    loop.create_task(uploadMediaFiles('nekochans', bot.send_photo, 'photo')),
+    loop.create_task(uploadMediaFiles('nekochans', bot.send_photo)),
 ]
 
 wait_tasks = asyncio.wait(tasks)
