@@ -105,6 +105,11 @@ async def cmd_neko(message: types.Message):
     async with aiofiles.open(NEKODIR + random_file, mode='rb') as photo:
         await message.reply_photo(photo, caption='Держи кошкодевочку!')
 
+@dp.message_handler(commands=['debug'])
+async def cmd_debug(message: types.Message):
+    text = 'Chat ID: ' + str(message.chat.id) + ' UID :' + str(message.from_user.id)
+    await message.answer(text, parse_mode=ParseMode.HTML)
+
 
 @dp.message_handler(commands=['save'])
 async def cmd_save(message: types.Message):

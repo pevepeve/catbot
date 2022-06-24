@@ -153,6 +153,8 @@ config/
 config.py
 *.json
 media/
-testdef*.py
+testd*.py
 test.py
 *.sqlite
+*.sql
+*.db
