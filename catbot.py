@@ -1,3 +1,5 @@
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 from random import randrange
 from datetime import date
@@ -5,7 +7,6 @@ import logging
 import json
 
 from emoji import emojize
-from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from sqlitedict import SqliteDict
@@ -34,20 +35,22 @@ days_list_ru = ['понедельник', 'вторник', 'среда',
 with open(JSON_FILE, mode='rb') as json_anime:
     anime_dict = json.load(json_anime)
 
+
 logging.basicConfig(level=logging.INFO, filename='logs/bot.log')
-engine = create_engine(f'sqlite:///{NEKODB_FILENAME}')
-session_factory = sessionmaker(bind=engine)
+engine = create_async_engine(f'sqlite+aiosqlite:///{NEKODB_FILENAME}')
+session_factory = sessionmaker(
+    bind=engine, expire_on_commit=False, class_=AsyncSession)
 Session = scoped_session(session_factory)
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
 
 async def get_random_nekochan():
-    count_nekos = Session.execute(func.count(NekoIds.filename)).scalar_one()
-    random_neko = randrange(1, count_nekos)
-    nekoid = Session.execute(select(NekoIds.file_id).where(
-        NekoIds.id == random_neko)).scalar_one()
-    return nekoid
+    count_nekos = await Session.execute(func.count(NekoIds.filename))
+    random_neko = randrange(1, count_nekos.scalar_one())
+    nekoid = await Session.execute(select(NekoIds.file_id).where(
+        NekoIds.id == random_neko))
+    return nekoid.scalar_one()
 
 
 def get_keyboard_days():
