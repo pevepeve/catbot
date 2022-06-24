@@ -1,3 +1,4 @@
+from sqlalchemy import func, select
 from random import randrange
 from datetime import date
 import logging
@@ -32,28 +33,27 @@ days_list_ru = ['понедельник', 'вторник', 'среда',
 
 with open(JSON_FILE, mode='rb') as json_anime:
     anime_dict = json.load(json_anime)
-# Configure logging
+
 logging.basicConfig(level=logging.INFO, filename='logs/bot.log')
-
 engine = create_engine(f'sqlite:///{NEKODB_FILENAME}')
-
 session_factory = sessionmaker(bind=engine)
 Session = scoped_session(session_factory)
-
-# Initialize bot and dispatcher
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(bot)
 
+
 async def get_random_nekochan():
-    count_nekos = Session.query(NekoIds.filename).count()
+    count_nekos = Session.execute(func.count(NekoIds.filename)).scalar_one()
     random_neko = randrange(1, count_nekos)
-    nekoid = Session.query(NekoIds.file_id).filter_by(id=random_neko).first()[0]
+    nekoid = Session.execute(select(NekoIds.file_id).where(
+        NekoIds.id == random_neko)).scalar_one()
     return nekoid
-    
+
 
 def get_keyboard_days():
     buttons = [types.InlineKeyboardButton(
-        text=days_list_ru[day_num], callback_data='weekday_'+day_name) for day_num, day_name in enumerate(days_list)]
+        text=days_list_ru[day_num],
+        callback_data='weekday_' + day_name) for day_num, day_name in enumerate(days_list)]
     keyboard = types.InlineKeyboardMarkup(row_width=ROW_LEN_WEEK_BUTTONS)
     keyboard.add(*buttons)
     return keyboard
@@ -120,7 +120,8 @@ async def cmd_neko(message: types.Message):
 
 @dp.message_handler(commands=['debug'])
 async def cmd_debug(message: types.Message):
-    text = 'Chat ID: ' + str(message.chat.id) + ' UID :' + str(message.from_user.id)
+    text = 'Chat ID: ' + str(message.chat.id) + \
+        ' UID :' + str(message.from_user.id)
     await message.answer(text, parse_mode=ParseMode.HTML)
 
 
