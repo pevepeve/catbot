@@ -29,25 +29,30 @@ def get_synopsis(page):
 
     return syn.strip()
 
-animes = json.loads(requests.get(JSON_URL).text)
+def get_schedule():
+    animes = json.loads(requests.get(JSON_URL).text)
 
-anime_dictionary = {}
+    anime_dictionary = {}
 
-days_list = ['Monday', 'Tuesday', 'Wednesday',
-             'Thursday', 'Friday', 'Saturday', 'Sunday']
+    days_list = ['Monday', 'Tuesday', 'Wednesday',
+                'Thursday', 'Friday', 'Saturday', 'Sunday']
 
-for day in days_list:
-    anime_day = animes['schedule'][day]
-    anime_dictionary[day] = []
-    for i in range(len(anime_day)):
-        show = anime_day[i]
-        anime_dictionary[day].append({
-            'title': show['title'],
-            'time': show['time'],
-            'synopsis': get_synopsis(show['page']),
-            'image': get_image(show['image_url'], show['page']),
-            'url' : get_full_url(show['page'])})
+    for day in days_list:
+        anime_day = animes['schedule'][day]
+        anime_dictionary[day] = []
+        for i in range(len(anime_day)):
+            show = anime_day[i]
+            anime_dictionary[day].append({
+                'title': show['title'],
+                'time': show['time'],
+                'synopsis': get_synopsis(show['page']),
+                'image': get_image(show['image_url'], show['page']),
+                'url' : get_full_url(show['page'])})
 
 
-with open('anime.json', 'w', encoding='utf-8') as f:
-    json.dump(anime_dictionary, f, ensure_ascii=False, indent=4)
+    with open('anime.json', 'w', encoding='utf-8') as f:
+        json.dump(anime_dictionary, f, ensure_ascii=False, indent=4)
+
+
+if __name__ == '__main__':
+    get_schedule()

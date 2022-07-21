@@ -8,6 +8,9 @@ from random import randrange
 from datetime import date
 import logging
 import json
+from logging import StreamHandler
+import os 
+import sys
 
 from emoji import emojize
 from sqlalchemy.orm import scoped_session, sessionmaker
@@ -21,6 +24,7 @@ from aiogram.utils.markdown import text, bold, italic, code, pre
 
 from data.config.config import API_TOKEN, NEKODB_FILENAME
 from db_neko import NekoIds, AnimeThumbsIds
+import fetch_subsplease
 
 SCRAPED_SITE = 'https://subsplease.org'
 MEDIA_FOLDER = 'media/'
@@ -54,12 +58,6 @@ dp = Dispatcher(bot, storage=storage)
 dp.middleware.setup(LoggingMiddleware())
 
 
-class AnimePanelStates(StatesGroup):
-    day = State()
-    anime = State()
-    neutral = State()
-
-
 async def get_random_nekochan():
     count_nekos = await Session.execute(func.count(NekoIds.filename))
     random_neko = randrange(1, count_nekos.scalar_one())
@@ -67,6 +65,10 @@ async def get_random_nekochan():
         NekoIds.id == random_neko))
     return nekoid.scalar_one()
 
+
+###############################
+#     KEYBOARDS
+###############################
 
 def get_keyboard_days(day=None):
     buttons = [types.InlineKeyboardButton(
@@ -102,7 +104,6 @@ async def callbacks_weekday(callback_query: types.CallbackQuery):
     weekday_q = callback_query.data.split("_")[1]
     today_anime = anime_dict[weekday_q]
     day_pretty = days_list_ru[days_list.index(weekday_q)].capitalize()
-    # await AnimePanelStates.day.set()
     text = f'<b>{day_pretty}</b> - с субтитрами выходят аниме:\n'
     for num, title_item in enumerate(today_anime):
         formatted_str = f'<b>{num}. {title_item["title"]}</b> : {title_item["time"]} \n'
@@ -116,7 +117,6 @@ async def callbacks_anime(callback_query: types.CallbackQuery):
     weekday_q, title_q = callback_query.data.split(
         "_")[1], callback_query.data.split("_")[2]
     anime_title = anime_dict[weekday_q][int(title_q)]
-    # await AnimePanelStates.anime.set()
     kb_back = types.InlineKeyboardMarkup()
     buttons = [types.InlineKeyboardButton(
         text='Назад', callback_data='back_' + weekday_q), ]
@@ -169,7 +169,6 @@ async def cmd_help(message: types.Message):
 async def cmd_animetoday(message: types.Message):
     today_num = date.today().weekday()
     today_anime = anime_dict[days_list[today_num]]
-    # await AnimePanelStates.day.set()
     text = f'Сегодня {days_list_ru[today_num]}, и выходят с субтитрами аниме:\n'
     for num, title_item in enumerate(today_anime):
         formatted_str = f'<b>{num}. {title_item["title"]}</b> : {title_item["time"]} \n'
@@ -186,6 +185,16 @@ async def cmd_neko(message: types.Message):
     random_neko_id = await get_random_nekochan()
     neko_caption = 'Держи кошкодевочку!'
     await message.reply_photo(random_neko_id, caption=neko_caption)
+
+@dp.message_handler(commands=['update_anime'])
+async def cmd_neko(message: types.Message):
+    try:
+        fetch_subsplease.get_schedule()
+    except Exception as e:
+        logger.error(e)
+    else:
+        text = 'Updated'
+        await message.answer(text, parse_mode=ParseMode.HTML)
 
 
 @dp.message_handler(commands=['debug'])
@@ -247,4 +256,13 @@ async def kek(message: types.Message):
 
 
 if __name__ == '__main__':
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    handler = StreamHandler(sys.stdout)
+    logger.addHandler(handler)
+    formatter = logging.Formatter(
+        '%(asctime)s, [%(levelname)s] %(message)s'
+    )
+    handler.setFormatter(formatter)
+
     executor.start_polling(dp, skip_updates=True)
