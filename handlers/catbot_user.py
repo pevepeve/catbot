@@ -1,62 +1,35 @@
-from aiogram.dispatcher.filters.state import State, StatesGroup
-#from aiogram.dispatcher.filters import Text
-#from aiogram.dispatcher import FSMContext
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select
-from random import randrange
-from datetime import date
-import logging
 import json
-from logging import StreamHandler
-import os 
-import sys
+from datetime import date
+from random import randrange
 
-from emoji import emojize
-from sqlalchemy.orm import scoped_session, sessionmaker
-
-from sqlitedict import SqliteDict
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram import Bot, Dispatcher, executor, types
+from aiogram import Dispatcher, types
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters import Text
 from aiogram.types import ParseMode
-from aiogram.utils.markdown import text, bold, italic, code, pre
+from aiogram.utils.markdown import bold, text
+from emoji import emojize
+from sqlalchemy import func, select
 
-#from data.config.config import API_TOKEN, NEKODB_FILENAME
-from db_neko import NekoIds, AnimeThumbsIds
-import fetch_subsplease
+from db_neko import AnimeThumbsIds, NekoIds
 
-SCRAPED_SITE = 'https://subsplease.org'
-MEDIA_FOLDER = 'media/'
-SHOWS_FOLDER = '/shows/'
-NEKODIR = 'media/nekochans/'
-JSON_FILE = 'anime.json'
+from ..bot import Session
+
 ROW_LEN_WEEK_BUTTONS = 4
 ROW_LEN_TITLES_BUTTONS = 2
 LETTERS_IN_TITLE_BTN = 7
+ANIME_SCHEDULE_JSON_FILE = 'anime.json'
 MAX_LEN_CAPTION = 1023
-saved_messages_table = SqliteDict(
-    'saved.sqlite', tablename='saved', autocommit=True)
 
 days_list = ['Monday', 'Tuesday', 'Wednesday',
              'Thursday', 'Friday', 'Saturday', 'Sunday']
 days_list_ru = ['понедельник', 'вторник', 'среда',
                 'четверг', 'пятница', 'суббота', 'воскресенье']
 
-with open(JSON_FILE, mode='rb') as json_anime:
+
+with open(ANIME_SCHEDULE_JSON_FILE, mode='rb') as json_anime:
     anime_dict = json.load(json_anime)
-
-
-logging.basicConfig(level=logging.INFO, filename='logs/bot.log')
-engine = create_async_engine(f'sqlite+aiosqlite:///{NEKODB_FILENAME}')
-session_factory = sessionmaker(
-    bind=engine, expire_on_commit=False, class_=AsyncSession)
-Session = scoped_session(session_factory)
-bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
-storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
-dp.middleware.setup(LoggingMiddleware())
-
+async def get_anime_thumbs_from_db():
+    pass
 
 async def get_random_nekochan():
     count_nekos = await Session.execute(func.count(NekoIds.filename))
@@ -64,11 +37,6 @@ async def get_random_nekochan():
     nekoid = await Session.execute(select(NekoIds.file_id).where(
         NekoIds.id == random_neko))
     return nekoid.scalar_one()
-
-
-###############################
-#     KEYBOARDS
-###############################
 
 def get_keyboard_days(day=None):
     buttons = [types.InlineKeyboardButton(
@@ -94,12 +62,12 @@ def get_keyboard_animes(titles_day, day):
     keyboard.add(*buttons)
     return keyboard
 
+
 ###############################
 #     CALLBACK HANDLERS
 ###############################
 
 
-@dp.callback_query_handler(text_startswith=['weekday_', 'back_'])
 async def callbacks_weekday(callback_query: types.CallbackQuery):
     weekday_q = callback_query.data.split("_")[1]
     today_anime = anime_dict[weekday_q]
@@ -108,11 +76,10 @@ async def callbacks_weekday(callback_query: types.CallbackQuery):
     for num, title_item in enumerate(today_anime):
         formatted_str = f'<b>{num}. {title_item["title"]}</b> : {title_item["time"]} \n'
         text += formatted_str
-    await bot.answer_callback_query(callback_query.id, emojize(':check_mark_button:'))
+    await callback_query.answer(emojize(':check_mark_button:'))
     await callback_query.message.answer(text, reply_markup=get_keyboard_days(weekday_q))
 
 
-@dp.callback_query_handler(text_startswith='anime_')
 async def callbacks_anime(callback_query: types.CallbackQuery):
     weekday_q, title_q = callback_query.data.split(
         "_")[1], callback_query.data.split("_")[2]
@@ -123,15 +90,13 @@ async def callbacks_anime(callback_query: types.CallbackQuery):
     kb_back.add(*buttons)
     text = f'<b>{anime_title["title"]} : {days_list_ru[days_list.index(weekday_q)]}, {anime_title["time"]}</b>\n'
     text += f'{anime_title["synopsis"]} \n'
-    await bot.answer_callback_query(callback_query.id, emojize(':check_mark_button:'))
+    await callback_query.answer(emojize(':check_mark_button:'))
     thumb_id = await Session.execute(select(AnimeThumbsIds.file_id).where(
         AnimeThumbsIds.filename == anime_title['image']))
     if len(text) > MAX_LEN_CAPTION:
         text = text[:MAX_LEN_CAPTION-4]+'...'
     await callback_query.message.reply_photo(thumb_id.scalar_one(), caption=text, reply_markup=kb_back)
 
-
-@dp.callback_query_handler(text_startswith=['animedayc_'])
 async def callbacks_animechoice(callback_query: types.CallbackQuery):
     weekday_q = callback_query.data.split("_")[1]
     text = f'*Выберите aниме*:\n'
@@ -146,15 +111,12 @@ async def callbacks_animechoice(callback_query: types.CallbackQuery):
 ###############################
 
 
-@dp.message_handler(commands=['start'])
-async def send_welcome(message: types.Message):
+async def cmd_start(message: types.Message):
     """
     This handler will be called when user sends `/start` or `/help` command
     """
     await message.reply('Hi!\nI send catgirls and anime schedules.')
 
-
-@dp.message_handler(commands=['help'])
 async def cmd_help(message: types.Message):
     await message.reply(text(bold('Я могу ответить на следующие команды:'),
                              '/start',
@@ -164,8 +126,6 @@ async def cmd_help(message: types.Message):
                              sep='\n'),
                         parse_mode=ParseMode.MARKDOWN_V2)
 
-
-@dp.message_handler(commands=['animetoday'])
 async def cmd_animetoday(message: types.Message):
     today_num = date.today().weekday()
     today_anime = anime_dict[days_list[today_num]]
@@ -179,31 +139,12 @@ async def cmd_animetoday(message: types.Message):
     kb_moreinfo.add(*buttons)
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb_moreinfo)
 
-
-@dp.message_handler(commands=['neko'])
 async def cmd_neko(message: types.Message):
     random_neko_id = await get_random_nekochan()
     neko_caption = 'Держи кошкодевочку!'
     await message.reply_photo(random_neko_id, caption=neko_caption)
 
-@dp.message_handler(commands=['update_anime'])
-async def cmd_anime_update(message: types.Message):
-    try:
-        fetch_subsplease.get_schedule()
-    except Exception as e:
-        logger.error(e)
-    else:
-        text = 'Updated'
-        await message.answer(text, parse_mode=ParseMode.HTML)
-
-
-@dp.message_handler(commands=['debug'])
-async def cmd_debug(message: types.Message):
-    text = 'Chat ID: ' + str(message.chat.id) + \
-        ' UID :' + str(message.from_user.id)
-    await message.answer(text, parse_mode=ParseMode.HTML)
-
-
+'''
 @dp.message_handler(commands=['save'])
 async def cmd_save(message: types.Message):
     if message.reply_to_message:
@@ -220,7 +161,6 @@ async def cmd_save(message: types.Message):
     else:
         await message.answer('Nothing to save')
 
-
 @dp.message_handler(commands=['unpack'])
 async def cmd_unpack(message: types.Message):
     if len(message.text.split()) > 1:
@@ -232,9 +172,8 @@ async def cmd_unpack(message: types.Message):
             await message.answer(reply, parse_mode=ParseMode.HTML)
     else:
         await message.answer('Nothing to unpack')
+'''
 
-
-@dp.message_handler(commands=['animes'])
 async def cmd_animeschedules(message: types.Message):
     text = f'*Выберите день*:\n'
     await message.answer(text, reply_markup=get_keyboard_days(), parse_mode=ParseMode.MARKDOWN_V2)
@@ -244,25 +183,19 @@ async def cmd_animeschedules(message: types.Message):
 #     MESSAGE HANDLERS
 ###############################
 
-
-@dp.message_handler(regexp='(^кек$)')
 async def kek(message: types.Message):
 
     await message.answer('КЕК!')
 
-###############################
-#     MAIN CYCLE
-###############################
 
 
-if __name__ == '__main__':
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    handler = StreamHandler(sys.stdout)
-    logger.addHandler(handler)
-    formatter = logging.Formatter(
-        '%(asctime)s, [%(levelname)s] %(message)s'
-    )
-    handler.setFormatter(formatter)
-
-    executor.start_polling(dp, skip_updates=True)
+def register_handlers_cardholder(dp: Dispatcher):
+    dp.register_callback_query_handler(callbacks_weekday, text_startswith=['weekday_', 'back_'], state="*")
+    dp.register_callback_query_handler(callbacks_anime, text_startswith='anime_', state="*")
+    dp.register_callback_query_handler(callbacks_animechoice, text_startswith=['animedayc_'], state="*")
+    dp.register_message_handler(cmd_start, commands=['start'], state="*")
+    dp.register_message_handler(cmd_help, commands=['help'], state="*")
+    dp.register_message_handler(cmd_animetoday, commands=['animetoday'], state="*")
+    dp.register_message_handler(cmd_neko, commands=['neko'], state="*")
+    dp.register_message_handler(cmd_animeschedules, commands=['animes'], state="*")
+    dp.register_message_handler(kek, regexp='(^кек$)', state="*")

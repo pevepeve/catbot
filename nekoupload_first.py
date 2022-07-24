@@ -4,9 +4,14 @@ import logging
 from aiogram import Bot
 from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
+from dotenv import load_dotenv
 
-from data.config.config import API_TOKEN, ADMIN_ID, NEKODB_FILENAME
+load_dotenv()
 
+
+NEKODB_FILENAME = os.getenv('DB_FILENAME')
+API_TOKEN = os.getenv('API_TOKEN')
+ADMIN_ID = os.getenv('ADMIN_ID')
 
 from db_neko import Base, NekoIds
 
