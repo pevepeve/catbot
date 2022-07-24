@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 
 from db_neko import AnimeThumbsIds, NekoIds
 
-from ..bot import Session
+from bot import Session
 
 ROW_LEN_WEEK_BUTTONS = 4
 ROW_LEN_TITLES_BUTTONS = 2
@@ -189,7 +189,7 @@ async def kek(message: types.Message):
 
 
 
-def register_handlers_cardholder(dp: Dispatcher):
+def register_handlers_user(dp: Dispatcher):
     dp.register_callback_query_handler(callbacks_weekday, text_startswith=['weekday_', 'back_'], state="*")
     dp.register_callback_query_handler(callbacks_anime, text_startswith='anime_', state="*")
     dp.register_callback_query_handler(callbacks_animechoice, text_startswith=['animedayc_'], state="*")

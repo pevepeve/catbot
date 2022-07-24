@@ -1,6 +1,6 @@
 from aiogram.types import ParseMode
 from aiogram import Dispatcher, types
-from  .. import fetch_subsplease
+import fetch_subsplease
 import logging
 
 
@@ -22,6 +22,6 @@ async def cmd_debug(message: types.Message):
     await message.answer(text, parse_mode=ParseMode.HTML)
 
 
-def register_handlers_cardholder(dp: Dispatcher):
+def register_handlers_admin(dp: Dispatcher):
     dp.register_message_handler(cmd_anime_update, commands=['update_anime'], state="*")
     dp.register_message_handler(cmd_debug, commands=['debug'], state="*")

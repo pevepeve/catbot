@@ -15,7 +15,7 @@ from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import ParseMode
 
-from handlers import catbot_user
+from handlers import catbot_user, catbot_admin
 
 load_dotenv()
 
@@ -23,12 +23,13 @@ DB_FILENAME = os.getenv('DB_FILENAME')
 API_TOKEN = os.getenv('API_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_ID')
 
+engine = create_async_engine(f'sqlite+aiosqlite:///{DB_FILENAME}')
+session_factory = sessionmaker(
+    bind=engine, expire_on_commit=False, class_=AsyncSession)
+Session = scoped_session(session_factory)
+logger = logging.getLogger(__name__)
+
 if __name__ == '__main__':
-    engine = create_async_engine(f'sqlite+aiosqlite:///{DB_FILENAME}')
-    session_factory = sessionmaker(
-        bind=engine, expire_on_commit=False, class_=AsyncSession)
-    Session = scoped_session(session_factory)
-    logger = logging.getLogger(__name__)
 
     logging.basicConfig(level=logging.DEBUG,
                         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -41,7 +42,8 @@ if __name__ == '__main__':
     dp = Dispatcher(bot, storage=storage)
     dp.middleware.setup(LoggingMiddleware())
 
-    catbot_user.register_handlers_common(dp, ADMIN_ID)
+    catbot_user.register_handlers_user(dp)
+    catbot_admin.register_handlers_admin(dp)
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
     handler = StreamHandler(sys.stdout)
