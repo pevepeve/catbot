@@ -42,7 +42,7 @@ if __name__ == '__main__':
     dp = Dispatcher(bot, storage=storage)
     dp.middleware.setup(LoggingMiddleware())
 
-    catbot_user.register_handlers_user(dp)
+    catbot_user.register_handlers_user(dp, admin_id = int(ADMIN_ID))
     catbot_admin.register_handlers_admin(dp, admin_id = int(ADMIN_ID))
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)

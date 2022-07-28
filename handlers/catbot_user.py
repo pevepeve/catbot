@@ -15,7 +15,7 @@ from random import randrange
 
 from aiogram import Dispatcher, types
 from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters import Text
+from aiogram.dispatcher.filters import Text, IDFilter
 from aiogram.types import ParseMode
 from aiogram.utils.markdown import bold, text
 from emoji import emojize
@@ -279,7 +279,7 @@ async def kek(message: types.Message):
     await message.answer('КЕК!')
 
 
-def register_handlers_user(dp: Dispatcher):
+def register_handlers_user(dp: Dispatcher, admin_id: int):
     dp.register_callback_query_handler(callbacks_weekday, text_startswith=[
                                        'weekday_', 'back_'], state="*")
     dp.register_callback_query_handler(
@@ -293,8 +293,8 @@ def register_handlers_user(dp: Dispatcher):
     dp.register_message_handler(cmd_neko, commands=['neko'], state="*")
     dp.register_message_handler(
         cmd_animeschedules, commands=['animes'], state="*")
-    dp.register_message_handler(cmd_addneko, commands=['addneko'],  content_types=[
+    dp.register_message_handler(cmd_addneko, IDFilter(user_id=admin_id), commands=['addneko'],  content_types=[
                                 'photo'], commands_ignore_caption=False, state="*")
-    dp.register_message_handler(cmd_addneko, commands=[
-                                'addneko'],  commands_ignore_caption=False, state="*")
+    dp.register_message_handler(cmd_addneko, IDFilter(user_id=admin_id), commands=[
+                                'addneko'], commands_ignore_caption=False, state="*")
     dp.register_message_handler(kek, regexp='(^кек$)', state="*")
