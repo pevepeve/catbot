@@ -1,37 +1,12 @@
 import json
-import io
-import hashlib
-from bot import ADMIN_ID, API_TOKEN, DB_FILENAME
-import logging
-from aiogram import Bot
-import os
-
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
-from sqlalchemy.orm import scoped_session, sessionmaker
-
 from datetime import date
-from random import randrange
 
 from aiogram import Dispatcher, types
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters import Text, IDFilter
 from aiogram.types import ParseMode
 from aiogram.utils.markdown import bold, text
 from emoji import emojize
-from sqlalchemy import func, select
 
-from db_neko import Base, AnimeThumbsIds, NekoIds
-
-bot = Bot(token=API_TOKEN)
-
-engine = create_engine(f'sqlite:///{DB_FILENAME}')
-session_factory = sessionmaker(
-    bind=engine, expire_on_commit=False)
-Session = scoped_session(session_factory)
-
-if not os.path.isfile(f'./{DB_FILENAME}'):
-    Base.metadata.create_all(engine)
+from database_funcs import get_random_nekochan, get_thumb_id
 
 ROW_LEN_WEEK_BUTTONS = 4
 ROW_LEN_TITLES_BUTTONS = 2
@@ -49,6 +24,7 @@ with open(ANIME_SCHEDULE_JSON_FILE, mode='rb') as json_anime:
     anime_dict = json.load(json_anime)
 
 # Keyboards
+
 
 def get_keyboard_days(day=None):
     buttons = [types.InlineKeyboardButton(
@@ -82,52 +58,6 @@ def get_keyboard_back(weekday):
     kb_back.add(*buttons)
     return kb_back
 
-# Working with database
-
-async def get_thumb_id(filename):
-    thumb = await Session.execute(select(AnimeThumbsIds.file_id).where(
-        AnimeThumbsIds.filename == filename))
-    return thumb.scalar_one()
-
-
-async def get_random_nekochan():
-    count_nekos = await Session.execute(func.count(NekoIds.filename))
-    random_neko = randrange(1, count_nekos.scalar_one())
-    nekoid = await Session.execute(select(NekoIds.file_id).where(
-        NekoIds.id == random_neko))
-    return nekoid.scalar_one()
-
-
-async def photo_upload(file_io: io.BytesIO, md5: str):
-    exists = Session.execute(select(NekoIds.filename).where(
-        NekoIds.filename == md5+'.jpg')).scalars().first() is not None
-    if exists:
-        logging.info(
-            f'File {md5} is already in the database')
-        raise ValueError('Already exists')
-    logging.info(f'Started processing {md5}')
-    try:
-        with file_io as file:
-            msg = await bot.send_photo(ADMIN_ID, file, disable_notification=True)
-            file_id = msg.photo[-1].file_id
-            session = Session()
-            newItem = NekoIds(file_id=file_id, filename=md5+'.jpg')
-            try:
-                session.add(newItem)
-                session.commit()
-            except Exception as e:
-                logging.error(
-                    'Couldn\'t upload {}. Error is {}'.format(md5, e))
-            else:
-                logging.info(
-                    f'Successfully uploaded and saved to DB'
-                    f' file {md5} with id {file_id}')
-            finally:
-                session.close()
-    except Exception as e:
-        logging.error(
-            'Couldn\'t upload {}. Error is {}'.format(md5, e))
-
 ###############################
 #     CALLBACK HANDLERS
 ###############################
@@ -149,10 +79,8 @@ async def callbacks_anime(callback_query: types.CallbackQuery):
     weekday_q, title_q = callback_query.data.split(
         "_")[1], callback_query.data.split("_")[2]
     anime_title = anime_dict[weekday_q][int(title_q)]
-    text = f'<b>{anime_title["title"]} : '
-    f'{days_list_ru[days_list.index(weekday_q)]}, '
-    f'{anime_title["time"]}</b>\n'
-    f'{anime_title["synopsis"]} \n'
+    text = f'<b>{anime_title["title"]} : {days_list_ru[days_list.index(weekday_q)]}, {anime_title["time"]}</b>\n' 
+    text += ' {anime_title["synopsis"]} \n'
     await callback_query.answer(emojize(':check_mark_button:'))
     thumb_id = await get_thumb_id(anime_title['image'])
     if len(text) > MAX_LEN_CAPTION:
@@ -211,46 +139,19 @@ async def cmd_animetoday(message: types.Message):
 
 
 async def cmd_neko(message: types.Message):
-    random_neko_id = await get_random_nekochan()
-    neko_caption = 'Держи кошкодевочку!'
-    await message.reply_photo(random_neko_id, caption=neko_caption)
+    try:
+        random_neko_id = await get_random_nekochan()
+        neko_caption = 'Держи кошкодевочку!'
+        await message.reply_photo(random_neko_id, caption=neko_caption)
+    except Exception as e:
+        await message.answer(str(e) + random_neko_id)
+
 
 async def cmd_animeschedules(message: types.Message):
     text = f'*Выберите день*:\n'
     await message.answer(text,
                          reply_markup=get_keyboard_days(),
                          parse_mode=ParseMode.MARKDOWN_V2)
-
-
-async def cmd_addneko(message: types.Message):
-    if message.reply_to_message:
-        saveable = message.reply_to_message.photo[-1]
-        file_info = await saveable.get_file()
-        file_io = io.BytesIO()
-        await saveable.download(destination=file_io)
-        await message.answer(f'Downloaded id: {file_info}')
-        file_md5 = hashlib.md5(file_io.getbuffer()).hexdigest()
-        await message.answer(f'Downloaded md5: {file_md5}')
-        try:
-            await photo_upload(file_io, md5=file_md5)
-        except ValueError as error:
-            await message.answer(f'Error: {error}')
-
-    else:
-        try:
-            saveable = message.photo[-1]
-            file_info = await saveable.get_file()
-            file_io = io.BytesIO()
-            await saveable.download(destination=file_io)
-            await message.answer(f'Downloaded id: {file_info}')
-            file_md5 = hashlib.md5(file_io.getbuffer()).hexdigest()
-            await message.answer(f'Downloaded md5: {file_md5}')
-            try:
-                await photo_upload(file_io, md5=file_md5)
-            except ValueError as error:
-                await message.answer(f'Error: {error}')
-        except Exception as error:
-            await message.answer(f'Error: Nothing to save')
 
 ###############################
 #     MESSAGE HANDLERS
@@ -262,7 +163,7 @@ async def kek(message: types.Message):
     await message.answer('КЕК!')
 
 
-def register_handlers_user(dp: Dispatcher, admin_id: int):
+def register_handlers_user(dp: Dispatcher):
     dp.register_callback_query_handler(callbacks_weekday, text_startswith=[
                                        'weekday_', 'back_'], state="*")
     dp.register_callback_query_handler(
@@ -277,12 +178,4 @@ def register_handlers_user(dp: Dispatcher, admin_id: int):
     dp.register_message_handler(cmd_neko, commands=['neko'], state="*")
     dp.register_message_handler(
         cmd_animeschedules, commands=['animes'], state="*")
-    dp.register_message_handler(cmd_addneko,
-                                IDFilter(user_id=admin_id),
-                                commands=['addneko'],  content_types=['photo'],
-                                commands_ignore_caption=False, state="*")
-    dp.register_message_handler(cmd_addneko,
-                                IDFilter(user_id=admin_id),
-                                commands=['addneko'],
-                                commands_ignore_caption=False, state="*")
     dp.register_message_handler(kek, regexp='(^кек$)', state="*")
