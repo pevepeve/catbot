@@ -8,7 +8,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from data.config.config import API_TOKEN, ADMIN_ID, ANIMETHUMBDB_FILENAME
 
 
-from db_neko import Base, AnimeThumbsIds
+from common.db_neko import Base, AnimeThumbsIds
 
 logformat = u'%(filename)s [ LINE:%(lineno)+3s ]#%(levelname)+8s [%(asctime)s]  %(message)s'
 logging.basicConfig(format=logformat,

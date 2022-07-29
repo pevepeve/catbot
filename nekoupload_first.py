@@ -13,7 +13,7 @@ NEKODB_FILENAME = os.getenv('DB_FILENAME')
 API_TOKEN = os.getenv('API_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_ID')
 
-from db_neko import Base, NekoIds
+from common.db_neko import Base, NekoIds
 
 logformat = u'%(filename)s [ LINE:%(lineno)+3s ]#%(levelname)+8s [%(asctime)s]  %(message)s'
 logging.basicConfig(format=logformat,

@@ -3,14 +3,14 @@ import io
 import logging
 
 from aiogram import Dispatcher, types
-from aiogram.dispatcher.filters import IDFilter, Text
+from aiogram.dispatcher.filters import IDFilter
 from aiogram.types import ParseMode
 
 import fetch_subsplease
 
 logger = logging.getLogger(__name__)
 
-from database_funcs import photo_upload
+from common.db_methods import photo_upload
 
 
 async def cmd_anime_update(message: types.Message):

@@ -6,7 +6,7 @@ from aiogram.types import ParseMode
 from aiogram.utils.markdown import bold, text
 from emoji import emojize
 
-from database_funcs import get_random_nekochan, get_thumb_id
+from common.db_methods import get_random_nekochan, get_thumb_id
 
 ROW_LEN_WEEK_BUTTONS = 4
 ROW_LEN_TITLES_BUTTONS = 2
