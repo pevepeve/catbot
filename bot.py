@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select
 
 from aiogram import Bot, Dispatcher
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
