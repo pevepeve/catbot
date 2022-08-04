@@ -4,10 +4,11 @@ import os
 from random import randrange
 
 from aiogram import Bot
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, delete
 from sqlalchemy.orm import scoped_session, sessionmaker
 
-from db_neko import AnimeThumbsIds, Base, NekoIds
+
+from db_neko import AnimeThumbsIds, Base, NekoIds, SavedMessages
 
 from dotenv import load_dotenv
 
@@ -16,6 +17,7 @@ load_dotenv()
 DB_FILENAME = os.getenv('DB_FILENAME')
 API_TOKEN = os.getenv('API_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_ID')
+LAST_SAVED_MESSAGES = 20
 
 bot = Bot(token=API_TOKEN)
 
@@ -75,3 +77,22 @@ async def get_random_nekochan():
     nekoid = Session.execute(select(NekoIds.file_id).where(
         NekoIds.id == random_neko))
     return nekoid.scalar_one()
+
+
+async def save_to_db(message, date):
+    '''       newItem = SavedMessages(text=message, date=date)
+            Session.query(NekoIds.filename).first()
+            Session.query(SavedMessages).filter(
+      SavedMessages.user_id == user_id).order_by(desc(SavedMessages.id).limit(1)
+      User.query.filter_by(id=123).delete()
+            delItem = delete(SavedMessages).where(SavedMessages.c.id == 'patrick')
+            try:
+                session.add(newItem)
+                session.add(delItem)
+                session.commit()
+            except Exception as e:
+                logging.error(
+                    'Couldn\'t save message {}. Error is {}'.format(message, e))
+            finally:
+                session.close()'''
+    pass

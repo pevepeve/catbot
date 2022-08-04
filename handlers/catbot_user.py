@@ -6,7 +6,7 @@ from aiogram.types import ParseMode
 from aiogram.utils.markdown import bold, text
 from emoji import emojize
 
-from common.db_methods import get_random_nekochan, get_thumb_id
+from common.db_methods import get_random_nekochan, get_thumb_id, save_to_db
 
 ROW_LEN_WEEK_BUTTONS = 4
 ROW_LEN_TITLES_BUTTONS = 2
@@ -79,7 +79,7 @@ async def callbacks_anime(callback_query: types.CallbackQuery):
     weekday_q, title_q = callback_query.data.split(
         "_")[1], callback_query.data.split("_")[2]
     anime_title = anime_dict[weekday_q][int(title_q)]
-    text = f'<b>{anime_title["title"]} : {days_list_ru[days_list.index(weekday_q)]}, {anime_title["time"]}</b>\n' 
+    text = f'<b>{anime_title["title"]} : {days_list_ru[days_list.index(weekday_q)]}, {anime_title["time"]}</b>\n'
     text += ' {anime_title["synopsis"]} \n'
     await callback_query.answer(emojize(':check_mark_button:'))
     thumb_id = await get_thumb_id(anime_title['image'])
@@ -163,6 +163,10 @@ async def kek(message: types.Message):
     await message.answer('КЕК!')
 
 
+async def textsave(message: types.Message):
+    await save_to_db(message.text, message.date)
+
+
 def register_handlers_user(dp: Dispatcher):
     dp.register_callback_query_handler(callbacks_weekday, text_startswith=[
                                        'weekday_', 'back_'], state="*")
@@ -179,3 +183,4 @@ def register_handlers_user(dp: Dispatcher):
     dp.register_message_handler(
         cmd_animeschedules, commands=['animes'], state="*")
     dp.register_message_handler(kek, regexp='(^кек$)', state="*")
+    dp.register_message_handler(textsave, state="*")
