@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, func, select, asc
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 
-from db_neko import AnimeThumbsIds, Base, NekoIds, SavedMessages
+from common.db_neko import AnimeThumbsIds, Base, NekoIds, SavedMessages
 
 from dotenv import load_dotenv
 
@@ -79,14 +79,14 @@ async def get_random_nekochan():
     return nekoid.scalar_one()
 
 
-async def save_to_db(message, date):
+async def save_to_db(message, date, chatid):
     try:
-        count_saved = Session.execute(func.count(SavedMessages.id)).scalar_one()
+        count_saved = Session.execute(func.count(select(SavedMessages).where(SavedMessages.chatid == chatid))).scalar_one()
         if int(count_saved) > LAST_SAVED_MESSAGES:
-            statement = select(SavedMessages).order_by(asc(SavedMessages.id)).limit(1)
+            statement = select(SavedMessages).where(SavedMessages.chatid == chatid).order_by(asc(SavedMessages.id)).limit(1)
             first = Session.execute(statement).scalar_one()
             Session.delete(first)
-        newItem = SavedMessages(text=message, date=date)
+        newItem = SavedMessages(text=message, date=date, chatid=chatid)
         Session.add(newItem)
         Session.commit()
     finally:

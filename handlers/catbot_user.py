@@ -164,7 +164,7 @@ async def kek(message: types.Message):
 
 
 async def textsave(message: types.Message):
-    await save_to_db(message.text, message.date)
+    await save_to_db(message.text, message.date, message.chat.id)
 
 
 def register_handlers_user(dp: Dispatcher):

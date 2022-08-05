@@ -1,3 +1,4 @@
+from ast import In
 from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -20,5 +21,6 @@ class AnimeThumbsIds(Base):
 class SavedMessages(Base):
     __tablename__ = 'SavedMessages'
     id = Column(Integer, primary_key=True)
+    chatid = Column(Integer)
     text = Column(Text)
     date = Column(String(255))
