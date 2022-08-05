@@ -33,7 +33,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG,
                         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
                         filename='logs/bot.log',
-                        # encoding='utf-8'
+                        # encoding='utf-8' ## fails in some logging versions
                         )
 
     logger.info("Starting bot")
