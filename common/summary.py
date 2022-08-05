@@ -19,5 +19,5 @@ def summarize_sumy(string: str):
     
     summ = ''
     for sentence in summarizer(parser.document, SENTENCES_COUNT):
-        summ += sentence.__str__()
+        summ += sentence.__str__() + '\n'
     return summ

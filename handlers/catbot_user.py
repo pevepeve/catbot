@@ -159,7 +159,7 @@ async def cmd_animeschedules(message: types.Message):
 async def cmd_tldr(message: types.Message):
     msgstext = await get_last_messages(message.chat.id)
     summary = 'Вкратце в предыдущих сообщениях:\n' + \
-        summarize_sumy('.\n'.join(msgstext))
+        summarize_sumy('. \n'.join(msgstext))
     await message.answer(summary, parse_mode=ParseMode.HTML)
 
 ###############################
