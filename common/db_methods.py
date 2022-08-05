@@ -29,6 +29,7 @@ Session = scoped_session(session_factory)
 if not os.path.isfile(f'./{DB_FILENAME}'):
     Base.metadata.create_all(engine)
 
+
 ########################################
 #             Functions
 ########################################
