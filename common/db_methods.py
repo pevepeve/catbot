@@ -17,7 +17,7 @@ load_dotenv()
 DB_FILENAME = os.getenv('DB_FILENAME')
 API_TOKEN = os.getenv('API_TOKEN')
 ADMIN_ID = os.getenv('ADMIN_ID')
-LAST_SAVED_MESSAGES = 20
+LAST_SAVED_MESSAGES = 50
 
 bot = Bot(token=API_TOKEN)
 

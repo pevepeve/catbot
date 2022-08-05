@@ -1,6 +1,6 @@
 import logging
 from logging import StreamHandler
-import os 
+import os
 import sys
 
 from dotenv import load_dotenv
@@ -32,7 +32,9 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging.DEBUG,
                         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-                        filename='logs/bot.log', encoding='utf-8')
+                        filename='logs/bot.log',
+                        # encoding='utf-8'
+                        )
 
     logger.info("Starting bot")
 
@@ -42,7 +44,7 @@ if __name__ == '__main__':
     dp.middleware.setup(LoggingMiddleware())
 
     catbot_user.register_handlers_user(dp)
-    catbot_admin.register_handlers_admin(dp, admin_id = int(ADMIN_ID))
+    catbot_admin.register_handlers_admin(dp, admin_id=int(ADMIN_ID))
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
     handler = StreamHandler(sys.stdout)
