@@ -80,19 +80,14 @@ async def get_random_nekochan():
 
 
 async def save_to_db(message, date):
-    '''       newItem = SavedMessages(text=message, date=date)
-            Session.query(NekoIds.filename).first()
-            Session.query(SavedMessages).filter(
-      SavedMessages.user_id == user_id).order_by(desc(SavedMessages.id).limit(1)
-      User.query.filter_by(id=123).delete()
-            delItem = delete(SavedMessages).where(SavedMessages.c.id == 'patrick')
-            try:
-                session.add(newItem)
-                session.add(delItem)
-                session.commit()
-            except Exception as e:
-                logging.error(
-                    'Couldn\'t save message {}. Error is {}'.format(message, e))
-            finally:
-                session.close()'''
-    pass
+    try:
+        count_saved = Session.execute(func.count(SavedMessages.id)).scalar_one()
+        if int(count_saved) > LAST_SAVED_MESSAGES:
+            statement = select(SavedMessages).order_by(asc(SavedMessages.id)).limit(1)
+            first = Session.execute(statement).scalar_one()
+            Session.delete(first)
+        newItem = SavedMessages(text=message, date=date)
+        Session.add(newItem)
+        Session.commit()
+    finally:
+        Session.close()
