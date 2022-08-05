@@ -81,7 +81,7 @@ async def get_random_nekochan():
 
 async def save_to_db(message, date, chatid):
     try:
-        count_saved = Session.execute(func.count(select(SavedMessages).where(SavedMessages.chatid == chatid))).scalar_one()
+        count_saved = Session.execute(select(func.count()).select_from(SavedMessages).where(SavedMessages.chatid == chatid)).scalar_one()
         if int(count_saved) > LAST_SAVED_MESSAGES:
             statement = select(SavedMessages).where(SavedMessages.chatid == chatid).order_by(asc(SavedMessages.id)).limit(1)
             first = Session.execute(statement).scalar_one()
