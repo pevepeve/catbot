@@ -4,7 +4,7 @@ import os
 from random import randrange
 
 from aiogram import Bot
-from sqlalchemy import create_engine, func, select, delete
+from sqlalchemy import create_engine, func, select, asc
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 
