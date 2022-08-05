@@ -6,7 +6,9 @@ from aiogram.types import ParseMode
 from aiogram.utils.markdown import bold, text
 from emoji import emojize
 
-from common.db_methods import get_random_nekochan, get_thumb_id, save_to_db
+from common.db_methods import (
+    get_random_nekochan, get_thumb_id, save_to_db, get_last_messages)
+from common.summary import summarize_sumy
 
 ROW_LEN_WEEK_BUTTONS = 4
 ROW_LEN_TITLES_BUTTONS = 2
@@ -153,6 +155,12 @@ async def cmd_animeschedules(message: types.Message):
                          reply_markup=get_keyboard_days(),
                          parse_mode=ParseMode.MARKDOWN_V2)
 
+
+async def cmd_tldr(message: types.Message):
+    msgstext = get_last_messages(message.chat.id)
+    summary = 'Вкратце в предыдущих сообщениях:\n' + \
+        summarize_sumy('. '.join(msgstext))
+    await message.answer(summary, parse_mode=ParseMode.HTML)
 ###############################
 #     MESSAGE HANDLERS
 ###############################
@@ -182,5 +190,7 @@ def register_handlers_user(dp: Dispatcher):
     dp.register_message_handler(cmd_neko, commands=['neko'], state="*")
     dp.register_message_handler(
         cmd_animeschedules, commands=['animes'], state="*")
+    dp.register_message_handler(cmd_tldr, commands=['tldr'], state="*")
+
     dp.register_message_handler(kek, regexp='(^кек$)', state="*")
     dp.register_message_handler(textsave, state="*")
