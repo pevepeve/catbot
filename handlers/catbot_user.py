@@ -82,7 +82,7 @@ async def callbacks_anime(callback_query: types.CallbackQuery):
         "_")[1], callback_query.data.split("_")[2]
     anime_title = anime_dict[weekday_q][int(title_q)]
     text = f'<b>{anime_title["title"]} : {days_list_ru[days_list.index(weekday_q)]}, {anime_title["time"]}</b>\n'
-    text += ' {anime_title["synopsis"]} \n'
+    text += f' {anime_title["synopsis"]} \n'
     await callback_query.answer(emojize(':check_mark_button:'))
     thumb_id = await get_thumb_id(anime_title['image'])
     if len(text) > MAX_LEN_CAPTION:
