@@ -1,5 +1,6 @@
 import json
 from datetime import date
+import re
 
 from aiogram import Dispatcher, types
 from aiogram.types import ParseMode
@@ -15,6 +16,7 @@ ROW_LEN_TITLES_BUTTONS = 2
 LETTERS_IN_TITLE_BTN = 7
 ANIME_SCHEDULE_JSON_FILE = 'anime.json'
 MAX_LEN_CAPTION = 1023
+NITTER_INSTANCE = 'https://nitter.hu/'
 
 days_list = ['Monday', 'Tuesday', 'Wednesday',
              'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -171,6 +173,13 @@ async def kek(message: types.Message):
     await message.answer('КЕК!')
 
 
+async def twitter_nitter(message: types.Message):
+    match = re.match(r'(https:\/\/twitter\.com\/\S*\/status\/\d*)\b', message.text)
+    nittered = match[1].replace('https://twitter.com/', NITTER_INSTANCE)
+    await message.answer(nittered)
+    await save_to_db(message.text, message.date, message.chat.id)
+
+
 async def textsave(message: types.Message):
     await save_to_db(message.text, message.date, message.chat.id)
 
@@ -193,4 +202,7 @@ def register_handlers_user(dp: Dispatcher):
     dp.register_message_handler(cmd_tldr, commands=['tldr'], state="*")
 
     dp.register_message_handler(kek, regexp='(^кек$)', state="*")
+    dp.register_message_handler(
+        twitter_nitter, regexp=r'(https:\/\/twitter\.com\/\S*\/status\/\d*)\b',
+        state="*")
     dp.register_message_handler(textsave, state="*")
