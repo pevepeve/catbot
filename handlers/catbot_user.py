@@ -174,10 +174,13 @@ async def kek(message: types.Message):
 
 
 async def twitter_nitter(message: types.Message):
-    match = re.match(r'(https:\/\/twitter\.com\/\S*\/status\/\d*)\b', message.text)
+    await save_to_db(message.text, message.date, message.chat.id)
+    match = re.search(
+        r'(https:\/\/twitter\.com\/.*\/status\/\d*)\b',
+        message.text,
+        re.MULTILINE)
     nittered = match[1].replace('https://twitter.com/', NITTER_INSTANCE)
     await message.answer(nittered)
-    await save_to_db(message.text, message.date, message.chat.id)
 
 
 async def textsave(message: types.Message):
