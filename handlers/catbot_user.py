@@ -176,7 +176,12 @@ async def kek(message: types.Message):
 async def twitter_nitter(message: types.Message):
     await save_to_db(message.text, message.date, message.chat.id)
     match = re.search(
-        r'(https:\/\/twitter\.com\/)\b',
+        r'(https:\/\/twitter\.com\/.*\/status\/\d*)\b',
+        message.text,
+        re.MULTILINE)
+    if not match: 
+        match = re.search(
+        r'(https:\/\/twitter\.com\/\w*)\b',
         message.text,
         re.MULTILINE)
     nittered = match[1].replace('https://twitter.com/', NITTER_INSTANCE)
@@ -206,6 +211,6 @@ def register_handlers_user(dp: Dispatcher):
 
     dp.register_message_handler(kek, regexp='(^кек$)', state="*")
     dp.register_message_handler(
-        twitter_nitter, regexp=r'(https:\/\/twitter\.com\/)\b',
+        twitter_nitter, regexp=r'https:\/\/twitter\.com\/\b',
         state="*")
     dp.register_message_handler(textsave, state="*")
