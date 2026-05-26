@@ -5,6 +5,7 @@ from aiogram import Dispatcher, types
 from aiogram.dispatcher.filters import IDFilter
 from aiogram.types import ParseMode
 
+import texts
 from config import get_settings
 from infrastructure import TelegramMediaStore
 from repositories import AnimeRepository, NekoRepository
@@ -23,11 +24,14 @@ async def cmd_anime_update(message: types.Message):
     except Exception as error:
         logger.error(error)
     else:
-        await message.answer("Updated", parse_mode=ParseMode.HTML)
+        await message.answer(texts.ADMIN_UPDATED, parse_mode=ParseMode.HTML)
 
 
 async def cmd_debug(message: types.Message):
-    debug_text = "Chat ID: " + str(message.chat.id) + " UID :" + str(message.from_user.id)
+    debug_text = texts.ADMIN_DEBUG.format(
+        chat_id=message.chat.id,
+        user_id=message.from_user.id,
+    )
     await message.answer(debug_text, parse_mode=ParseMode.HTML)
 
 
@@ -41,15 +45,15 @@ async def cmd_addneko(message: types.Message):
         file_info = await saveable.get_file()
         file_io = io.BytesIO()
         await saveable.download(destination=file_io)
-        await message.answer(f"Downloaded id: {file_info}")
+        await message.answer(texts.ADMIN_DOWNLOADED_ID.format(file_info=file_info))
 
         media_store = TelegramMediaStore(message.bot, settings.admin_id)
         file_md5 = await neko_service.add_neko(file_io, media_store)
-        await message.answer(f"Downloaded md5: {file_md5}")
+        await message.answer(texts.ADMIN_DOWNLOADED_MD5.format(file_md5=file_md5))
     except ValueError as error:
-        await message.answer(f"Error: {error}")
+        await message.answer(texts.ADMIN_ALREADY_EXISTS.format(error=error))
     except Exception:
-        await message.answer("Error: Nothing to save")
+        await message.answer(texts.ADMIN_NOTHING_TO_SAVE)
 
 
 def register_handlers_admin(dp: Dispatcher, admin_id: int):
@@ -80,3 +84,4 @@ def register_handlers_admin(dp: Dispatcher, admin_id: int):
         commands_ignore_caption=False,
         state="*",
     )
+

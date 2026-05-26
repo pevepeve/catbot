@@ -1,7 +1,7 @@
 from datetime import date
+from typing import Optional
 
-import fetch_subsplease
-
+from infrastructure.subsplease_client import SubspleaseClient
 from repositories.anime_repository import AnimeRepository
 
 
@@ -25,8 +25,9 @@ class AnimeService:
         "воскресенье",
     ]
 
-    def __init__(self, repository: AnimeRepository):
+    def __init__(self, repository: AnimeRepository, client: Optional[SubspleaseClient] = None):
         self.repository = repository
+        self.client = client or SubspleaseClient()
 
     def get_day_label(self, weekday: str) -> str:
         return self.days_list_ru[self.days_list.index(weekday)]
@@ -49,5 +50,6 @@ class AnimeService:
         return self.repository.get_thumbnail_id(filename)
 
     def refresh_schedule(self) -> None:
-        fetch_subsplease.get_schedule()
+        schedule = self.client.fetch_schedule()
+        self.repository.save_schedule(schedule)
 

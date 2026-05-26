@@ -19,6 +19,10 @@ class AnimeRepository:
         with self.schedule_path.open("rb") as schedule_file:
             return json.load(schedule_file)
 
+    def save_schedule(self, schedule: dict) -> None:
+        with self.schedule_path.open("w", encoding="utf-8") as schedule_file:
+            json.dump(schedule, schedule_file, ensure_ascii=False, indent=4)
+
     def get_thumbnail_id(self, filename: str) -> str:
         session = self.session_factory()
         try:

@@ -1,5 +1,8 @@
-from aiogram import types
 from typing import Optional
+
+from aiogram import types
+
+import texts
 
 
 ROW_LEN_WEEK_BUTTONS = 4
@@ -18,7 +21,7 @@ def get_keyboard_days(days_list: list[str], days_list_ru: list[str], day: Option
     if day is not None:
         buttons.append(
             types.InlineKeyboardButton(
-                text="Подробнее",
+                text=texts.MORE_DETAILS,
                 callback_data=f"animedayc_{day}",
             )
         )
@@ -37,7 +40,7 @@ def get_keyboard_animes(titles_day: list[dict], day: str):
     ]
     buttons.append(
         types.InlineKeyboardButton(
-            text="Назад",
+            text=texts.BACK,
             callback_data=f"back_{day}",
         )
     )
@@ -50,8 +53,9 @@ def get_keyboard_back(weekday: str):
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton(
-            text="Назад",
+            text=texts.BACK,
             callback_data="back_" + weekday,
         )
     )
     return keyboard
+

@@ -3,6 +3,7 @@ from aiogram.types import ParseMode
 from aiogram.utils.markdown import bold, text
 from emoji import emojize
 
+import texts
 from repositories import AnimeRepository, MessageRepository, NekoRepository
 from services import (
     AnimeService,
@@ -27,7 +28,7 @@ async def callbacks_weekday(callback_query: types.CallbackQuery):
     weekday_q = callback_query.data.split("_")[1]
     today_anime = anime_service.get_schedule_for_weekday(weekday_q)
     day_pretty = anime_service.get_day_label(weekday_q).capitalize()
-    message_text = f'<b>{day_pretty}</b> - С субтитрами выходят аниме:\n'
+    message_text = f"<b>{day_pretty}</b> - {texts.ANIME_DAY_PREFIX}\n"
     for num, title_item in enumerate(today_anime):
         formatted_str = f'<b>{num}. {title_item["title"]}</b> : {title_item["time"]} \n'
         message_text += formatted_str
@@ -67,28 +68,23 @@ async def callbacks_anime(callback_query: types.CallbackQuery):
 
 async def callbacks_animechoice(callback_query: types.CallbackQuery):
     weekday_q = callback_query.data.split("_")[1]
-    message_text = "*Выберите аниме*:\n"
     today_anime = anime_service.get_schedule_for_weekday(weekday_q)
     await callback_query.message.answer(
-        message_text,
+        texts.ANIME_PICK_TITLE,
         reply_markup=get_keyboard_animes(today_anime, weekday_q),
         parse_mode=ParseMode.MARKDOWN_V2,
     )
 
 
 async def cmd_start(message: types.Message):
-    await message.reply("Hi!\nI send catgirls and anime schedules.")
+    await message.reply(texts.START_TEXT)
 
 
 async def cmd_help(message: types.Message):
     await message.reply(
         text(
-            bold("Я могу ответить на следующие команды:"),
-            "/help - этот текст",
-            "/neko - отправляет картинку с кошкодевочкой",
-            "/animetoday - какое аниме выходит сегодня",
-            "/animes - аниме этого сезона",
-            "/tldr - суммаризация последних сообщений беседы",
+            bold(texts.HELP_TITLE),
+            *texts.HELP_LINES,
             sep="\n",
         ),
         parse_mode=ParseMode.MARKDOWN_V2,
@@ -98,7 +94,7 @@ async def cmd_help(message: types.Message):
 async def cmd_animetoday(message: types.Message):
     weekday, today_anime = anime_service.get_today_schedule()
     day_label = anime_service.get_day_label(weekday)
-    message_text = f"Сегодня {day_label}, и выходят с субтитрами аниме:\n"
+    message_text = texts.ANIME_TODAY_PREFIX.format(day_label=day_label)
     for num, title_item in enumerate(today_anime):
         formatted_str = f'<b>{num}. {title_item["title"]}</b> : {title_item["time"]} \n'
         message_text += formatted_str
@@ -106,7 +102,7 @@ async def cmd_animetoday(message: types.Message):
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton(
-            text="Подробнее",
+            text=texts.MORE_DETAILS,
             callback_data="animedayc_" + weekday,
         )
     )
@@ -120,14 +116,14 @@ async def cmd_animetoday(message: types.Message):
 async def cmd_neko(message: types.Message):
     try:
         random_neko_id = await neko_service.get_random_neko_id()
-        await message.reply_photo(random_neko_id, caption="Держи кошкодевочку!")
+        await message.reply_photo(random_neko_id, caption=texts.NEKO_CAPTION)
     except Exception as error:
         await message.answer(str(error))
 
 
 async def cmd_animeschedules(message: types.Message):
     await message.answer(
-        "*Выберите день*:\n",
+        texts.ANIME_PICK_DAY,
         reply_markup=get_keyboard_days(
             anime_service.days_list,
             anime_service.days_list_ru,
@@ -139,13 +135,13 @@ async def cmd_animeschedules(message: types.Message):
 async def cmd_tldr(message: types.Message):
     summary = await summary_service.summarize_recent(message.chat.id)
     await message.answer(
-        "Вкратце в предыдущих сообщениях:\n" + summary,
+        texts.TLDR_PREFIX + summary,
         parse_mode=ParseMode.HTML,
     )
 
 
 async def kek(message: types.Message):
-    await message.answer("КЕК!")
+    await message.answer(texts.KEK)
 
 
 async def twitter_nitter(message: types.Message):
@@ -190,3 +186,4 @@ def register_handlers_user(dp: Dispatcher):
         state="*",
     )
     dp.register_message_handler(textsave, state="*")
+
