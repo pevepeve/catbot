@@ -19,7 +19,6 @@ class NekoService:
         if self.repository.exists_by_filename(filename):
             raise ValueError("Already exists")
 
-        file_id = await media_store.upload_photo(file_io)
+        file_id = await media_store.upload_photo(file_io, filename=filename)
         self.repository.add_image(file_id=file_id, filename=filename)
         return file_md5
-

@@ -1,45 +1,37 @@
+import asyncio
 import logging
-from logging import StreamHandler
 import sys
 
-from aiogram import Bot, Dispatcher, executor
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.types import ParseMode
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 from config import get_settings
 from handlers import catbot_admin, catbot_user
 from infrastructure import init_db
 
 
-def main():
+async def main():
     settings = get_settings()
     init_db()
 
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        filename="logs/bot.log",
+        stream=sys.stdout,
     )
 
-    logger = logging.getLogger(__name__)
-    logger.info("Starting bot")
-
-    bot = Bot(token=settings.api_token, parse_mode=ParseMode.HTML)
-    storage = MemoryStorage()
-    dispatcher = Dispatcher(bot, storage=storage)
-    dispatcher.middleware.setup(LoggingMiddleware())
+    bot = Bot(
+        token=settings.api_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    dispatcher = Dispatcher()
 
     catbot_user.register_handlers_user(dispatcher)
     catbot_admin.register_handlers_admin(dispatcher, admin_id=settings.admin_id)
 
-    logger.setLevel(logging.DEBUG)
-    handler = StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter("%(asctime)s, [%(levelname)s] %(message)s"))
-    logger.addHandler(handler)
-
-    executor.start_polling(dispatcher, skip_updates=True)
+    await dispatcher.start_polling(bot)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

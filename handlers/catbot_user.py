@@ -1,6 +1,7 @@
-from aiogram import Dispatcher, types
-from aiogram.types import ParseMode
-from aiogram.utils.markdown import bold, text
+from aiogram import Dispatcher, F, Router
+from aiogram.enums import ParseMode
+from aiogram.filters import Command
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from emoji import emojize
 
 import texts
@@ -17,6 +18,7 @@ from ui import get_keyboard_animes, get_keyboard_back, get_keyboard_days
 
 MAX_LEN_CAPTION = 1023
 
+router = Router()
 anime_service = AnimeService(AnimeRepository())
 chat_history_service = ChatHistoryService(MessageRepository())
 summary_service = SummaryService(chat_history_service)
@@ -24,27 +26,29 @@ link_service = LinkService()
 neko_service = NekoService(NekoRepository())
 
 
-async def callbacks_weekday(callback_query: types.CallbackQuery):
+@router.callback_query(F.data.startswith("weekday_") | F.data.startswith("back_"))
+async def callbacks_weekday(callback_query: CallbackQuery):
     weekday_q = callback_query.data.split("_")[1]
     today_anime = anime_service.get_schedule_for_weekday(weekday_q)
     day_pretty = anime_service.get_day_label(weekday_q).capitalize()
     message_text = f"<b>{day_pretty}</b> - {texts.ANIME_DAY_PREFIX}\n"
     for num, title_item in enumerate(today_anime):
-        formatted_str = f'<b>{num}. {title_item["title"]}</b> : {title_item["time"]} \n'
-        message_text += formatted_str
+        message_text += f'<b>{num}. {title_item["title"]}</b> : {title_item["time"]} \n'
 
     await callback_query.answer(emojize(":check_mark_button:"))
-    await callback_query.message.answer(
-        message_text,
-        reply_markup=get_keyboard_days(
-            anime_service.days_list,
-            anime_service.days_list_ru,
-            weekday_q,
-        ),
-    )
+    if callback_query.message:
+        await callback_query.message.answer(
+            message_text,
+            reply_markup=get_keyboard_days(
+                anime_service.days_list,
+                anime_service.days_list_ru,
+                weekday_q,
+            ),
+        )
 
 
-async def callbacks_anime(callback_query: types.CallbackQuery):
+@router.callback_query(F.data.startswith("anime_"))
+async def callbacks_anime(callback_query: CallbackQuery):
     weekday_q = callback_query.data.split("_")[1]
     title_q = int(callback_query.data.split("_")[2])
     anime_title = anime_service.get_anime_details(weekday_q, title_q)
@@ -59,52 +63,57 @@ async def callbacks_anime(callback_query: types.CallbackQuery):
     if len(message_text) > MAX_LEN_CAPTION:
         message_text = message_text[: MAX_LEN_CAPTION - 4] + "..."
 
-    await callback_query.message.reply_photo(
-        thumb_id,
-        caption=message_text,
-        reply_markup=get_keyboard_back(weekday_q),
-    )
+    if callback_query.message:
+        await callback_query.message.reply_photo(
+            thumb_id,
+            caption=message_text,
+            reply_markup=get_keyboard_back(weekday_q),
+        )
 
 
-async def callbacks_animechoice(callback_query: types.CallbackQuery):
+@router.callback_query(F.data.startswith("animedayc_"))
+async def callbacks_animechoice(callback_query: CallbackQuery):
     weekday_q = callback_query.data.split("_")[1]
     today_anime = anime_service.get_schedule_for_weekday(weekday_q)
-    await callback_query.message.answer(
-        texts.ANIME_PICK_TITLE,
-        reply_markup=get_keyboard_animes(today_anime, weekday_q),
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
+    if callback_query.message:
+        await callback_query.message.answer(
+            texts.ANIME_PICK_TITLE,
+            reply_markup=get_keyboard_animes(today_anime, weekday_q),
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
 
 
-async def cmd_start(message: types.Message):
+@router.message(Command("start"))
+async def cmd_start(message: Message):
     await message.reply(texts.START_TEXT)
 
 
-async def cmd_help(message: types.Message):
+@router.message(Command("help"))
+async def cmd_help(message: Message):
+    help_lines = "\n".join(texts.HELP_LINES)
     await message.reply(
-        text(
-            bold(texts.HELP_TITLE),
-            *texts.HELP_LINES,
-            sep="\n",
-        ),
-        parse_mode=ParseMode.MARKDOWN_V2,
+        f"<b>{texts.HELP_TITLE}</b>\n{help_lines}",
+        parse_mode=ParseMode.HTML,
     )
 
 
-async def cmd_animetoday(message: types.Message):
+@router.message(Command("animetoday"))
+async def cmd_animetoday(message: Message):
     weekday, today_anime = anime_service.get_today_schedule()
     day_label = anime_service.get_day_label(weekday)
     message_text = texts.ANIME_TODAY_PREFIX.format(day_label=day_label)
     for num, title_item in enumerate(today_anime):
-        formatted_str = f'<b>{num}. {title_item["title"]}</b> : {title_item["time"]} \n'
-        message_text += formatted_str
+        message_text += f'<b>{num}. {title_item["title"]}</b> : {title_item["time"]} \n'
 
-    keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(
-        types.InlineKeyboardButton(
-            text=texts.MORE_DETAILS,
-            callback_data="animedayc_" + weekday,
-        )
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=texts.MORE_DETAILS,
+                    callback_data="animedayc_" + weekday,
+                )
+            ]
+        ]
     )
     await message.answer(
         message_text,
@@ -113,7 +122,8 @@ async def cmd_animetoday(message: types.Message):
     )
 
 
-async def cmd_neko(message: types.Message):
+@router.message(Command("neko"))
+async def cmd_neko(message: Message):
     try:
         random_neko_id = await neko_service.get_random_neko_id()
         await message.reply_photo(random_neko_id, caption=texts.NEKO_CAPTION)
@@ -121,7 +131,8 @@ async def cmd_neko(message: types.Message):
         await message.answer(str(error))
 
 
-async def cmd_animeschedules(message: types.Message):
+@router.message(Command("animes"))
+async def cmd_animeschedules(message: Message):
     await message.answer(
         texts.ANIME_PICK_DAY,
         reply_markup=get_keyboard_days(
@@ -132,7 +143,8 @@ async def cmd_animeschedules(message: types.Message):
     )
 
 
-async def cmd_tldr(message: types.Message):
+@router.message(Command("tldr"))
+async def cmd_tldr(message: Message):
     summary = await summary_service.summarize_recent(message.chat.id)
     await message.answer(
         texts.TLDR_PREFIX + summary,
@@ -140,50 +152,23 @@ async def cmd_tldr(message: types.Message):
     )
 
 
-async def kek(message: types.Message):
+@router.message(F.text.regexp(r"(^кек$)"))
+async def kek(message: Message):
     await message.answer(texts.KEK)
 
 
-async def twitter_nitter(message: types.Message):
+@router.message(F.text.regexp(r"https:\/\/twitter\.com\/\b"))
+async def twitter_nitter(message: Message):
     await chat_history_service.save_message(message.text, message.date, message.chat.id)
     nittered = link_service.rewrite_twitter_link(message.text)
     if nittered:
         await message.answer(nittered)
 
 
-async def textsave(message: types.Message):
+@router.message(F.text)
+async def textsave(message: Message):
     await chat_history_service.save_message(message.text, message.date, message.chat.id)
 
 
-def register_handlers_user(dp: Dispatcher):
-    dp.register_callback_query_handler(
-        callbacks_weekday,
-        text_startswith=["weekday_", "back_"],
-        state="*",
-    )
-    dp.register_callback_query_handler(
-        callbacks_anime,
-        text_startswith="anime_",
-        state="*",
-    )
-    dp.register_callback_query_handler(
-        callbacks_animechoice,
-        text_startswith=["animedayc_"],
-        state="*",
-    )
-
-    dp.register_message_handler(cmd_start, commands=["start"], state="*")
-    dp.register_message_handler(cmd_help, commands=["help"], state="*")
-    dp.register_message_handler(cmd_animetoday, commands=["animetoday"], state="*")
-    dp.register_message_handler(cmd_neko, commands=["neko"], state="*")
-    dp.register_message_handler(cmd_animeschedules, commands=["animes"], state="*")
-    dp.register_message_handler(cmd_tldr, commands=["tldr"], state="*")
-
-    dp.register_message_handler(kek, regexp="(^кек$)", state="*")
-    dp.register_message_handler(
-        twitter_nitter,
-        regexp=r"https:\/\/twitter\.com\/\b",
-        state="*",
-    )
-    dp.register_message_handler(textsave, state="*")
-
+def register_handlers_user(dispatcher: Dispatcher):
+    dispatcher.include_router(router)

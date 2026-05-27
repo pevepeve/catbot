@@ -23,7 +23,7 @@ async def photo_upload(file_io: io.BytesIO, md5: str):
         raise ValueError("Already exists")
 
     media_store = TelegramMediaStore(bot, settings.admin_id)
-    file_id = await media_store.upload_photo(file_io)
+    file_id = await media_store.upload_photo(file_io, filename=filename)
     neko_service.repository.add_image(file_id=file_id, filename=filename)
 
 

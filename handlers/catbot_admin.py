@@ -1,9 +1,9 @@
 import io
 import logging
 
-from aiogram import Dispatcher, types
-from aiogram.dispatcher.filters import IDFilter
-from aiogram.types import ParseMode
+from aiogram import F, Dispatcher, Router
+from aiogram.filters import Command
+from aiogram.types import Message
 
 import texts
 from config import get_settings
@@ -14,74 +14,61 @@ from services import AnimeService, NekoService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-anime_service = AnimeService(AnimeRepository())
-neko_service = NekoService(NekoRepository())
 
 
-async def cmd_anime_update(message: types.Message):
-    try:
-        anime_service.refresh_schedule()
-    except Exception as error:
-        logger.error(error)
-    else:
-        await message.answer(texts.ADMIN_UPDATED, parse_mode=ParseMode.HTML)
+def build_admin_router(admin_id: int) -> Router:
+    router = Router()
+    router.message.filter(F.from_user.id == admin_id)
 
+    anime_service = AnimeService(AnimeRepository())
+    neko_service = NekoService(NekoRepository())
 
-async def cmd_debug(message: types.Message):
-    debug_text = texts.ADMIN_DEBUG.format(
-        chat_id=message.chat.id,
-        user_id=message.from_user.id,
-    )
-    await message.answer(debug_text, parse_mode=ParseMode.HTML)
-
-
-async def cmd_addneko(message: types.Message):
-    try:
-        if message.reply_to_message:
-            saveable = message.reply_to_message.photo[-1]
+    @router.message(Command("update_anime"))
+    async def cmd_anime_update(message: Message):
+        try:
+            anime_service.refresh_schedule()
+        except Exception as error:
+            logger.error(error)
         else:
-            saveable = message.photo[-1]
+            await message.answer(texts.ADMIN_UPDATED)
 
-        file_info = await saveable.get_file()
-        file_io = io.BytesIO()
-        await saveable.download(destination=file_io)
-        await message.answer(texts.ADMIN_DOWNLOADED_ID.format(file_info=file_info))
+    @router.message(Command("debug"))
+    async def cmd_debug(message: Message):
+        debug_text = texts.ADMIN_DEBUG.format(
+            chat_id=message.chat.id,
+            user_id=message.from_user.id,
+        )
+        await message.answer(debug_text)
 
-        media_store = TelegramMediaStore(message.bot, settings.admin_id)
-        file_md5 = await neko_service.add_neko(file_io, media_store)
-        await message.answer(texts.ADMIN_DOWNLOADED_MD5.format(file_md5=file_md5))
-    except ValueError as error:
-        await message.answer(texts.ADMIN_ALREADY_EXISTS.format(error=error))
-    except Exception:
-        await message.answer(texts.ADMIN_NOTHING_TO_SAVE)
+    @router.message(Command("addneko"))
+    @router.message(F.photo & F.caption.regexp(r"^/addneko(?:@\w+)?$"))
+    async def cmd_addneko(message: Message):
+        try:
+            if message.reply_to_message and message.reply_to_message.photo:
+                saveable = message.reply_to_message.photo[-1]
+            elif message.photo:
+                saveable = message.photo[-1]
+            else:
+                raise ValueError(texts.ADMIN_NOTHING_TO_SAVE)
+
+            file_io = io.BytesIO()
+            await message.bot.download(saveable, destination=file_io)
+            await message.answer(texts.ADMIN_DOWNLOADED_ID.format(file_info=saveable.file_id))
+
+            media_store = TelegramMediaStore(message.bot, settings.admin_id)
+            file_md5 = await neko_service.add_neko(file_io, media_store)
+            await message.answer(texts.ADMIN_DOWNLOADED_MD5.format(file_md5=file_md5))
+        except ValueError as error:
+            error_text = str(error)
+            if error_text == texts.ADMIN_NOTHING_TO_SAVE:
+                await message.answer(error_text)
+            else:
+                await message.answer(texts.ADMIN_ALREADY_EXISTS.format(error=error))
+        except Exception:
+            await message.answer(texts.ADMIN_NOTHING_TO_SAVE)
+
+    return router
 
 
-def register_handlers_admin(dp: Dispatcher, admin_id: int):
-    dp.register_message_handler(
-        cmd_anime_update,
-        IDFilter(user_id=admin_id),
-        commands=["update_anime"],
-        state="*",
-    )
-    dp.register_message_handler(
-        cmd_debug,
-        IDFilter(user_id=admin_id),
-        commands=["debug"],
-        state="*",
-    )
-    dp.register_message_handler(
-        cmd_addneko,
-        IDFilter(user_id=admin_id),
-        commands=["addneko"],
-        content_types=["photo"],
-        commands_ignore_caption=False,
-        state="*",
-    )
-    dp.register_message_handler(
-        cmd_addneko,
-        IDFilter(user_id=admin_id),
-        commands=["addneko"],
-        commands_ignore_caption=False,
-        state="*",
-    )
-
+def register_handlers_admin(dispatcher: Dispatcher, admin_id: int):
+    dispatcher.include_router(build_admin_router(admin_id))

@@ -3,6 +3,7 @@ import logging
 import os
 
 from aiogram import Bot
+from aiogram.types import FSInputFile
 
 from config import get_settings
 from infrastructure.db import SessionLocal, init_db
@@ -42,9 +43,9 @@ async def upload_media_files(method):
 
         logging.info(f"Started processing {filename}")
         try:
-            with open(os.path.join(folder_path, filename), "rb") as file:
-                message = await method(settings.admin_id, file, disable_notification=True)
-                file_id = message.photo[-1].file_id
+            upload = FSInputFile(os.path.join(folder_path, filename), filename=filename)
+            message = await method(settings.admin_id, upload, disable_notification=True)
+            file_id = message.photo[-1].file_id
 
             session = SessionLocal()
             try:
