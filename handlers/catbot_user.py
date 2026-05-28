@@ -413,11 +413,13 @@ async def index_image_message(message: Message):
         user_id = None
 
     ocr_result = None
+    ocr_attempted = False
     if ocr_service.is_available:
         file_io = io.BytesIO()
         try:
             await message.bot.download(media_source, destination=file_io)
             ocr_result = ocr_service.extract_text(file_io)
+            ocr_attempted = True
         except Exception:
             logger.exception(
                 "Failed OCR indexing for chat_id=%s message_id=%s",
@@ -440,6 +442,7 @@ async def index_image_message(message: Message):
             file_id=media_source.file_id,
             file_unique_id=media_source.file_unique_id,
             ocr_result=ocr_result,
+            ocr_attempted=ocr_attempted,
         )
     except Exception:
         logger.exception(

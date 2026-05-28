@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
+
+import requests
 
 from config import get_settings
 from repositories.message_repository import ChatMessageRecord
@@ -23,38 +27,38 @@ except ImportError:  # pragma: no cover - optional dependency in local dev
 
 
 NOISE_MESSAGE_MIN_LEN = 2
-MAX_TOPICS = 5
+MAX_TOPICS = 3
 MAX_NOTABLE_POINTS = 4
 TOPIC_SCORE_MIN = 3
 NOTABLE_SCORE_MIN = 3
 SIMILARITY_THRESHOLD = 0.65
+TOPIC_CLUSTER_SIMILARITY_THRESHOLD = 0.45
+DEEPSEEK_MAX_TRANSCRIPT_CHARS = 12000
 QUESTION_WORDS = {
-    "\u043a\u0430\u043a",
-    "\u043a\u043e\u0433\u0434\u0430",
-    "\u043a\u0442\u043e",
-    "\u043a\u0443\u0434\u0430",
-    "\u0433\u0434\u0435",
-    "\u0437\u0430\u0447\u0435\u043c",
-    "\u043f\u043e\u0447\u0435\u043c\u0443",
-    "\u0447\u0442\u043e",
-    "\u0447\u0435\u0433\u043e",
-    "\u043a\u0430\u043a\u043e\u0439",
-    "\u043a\u0430\u043a\u0430\u044f",
-    "\u043a\u0430\u043a\u0438\u0435",
-    "\u043a\u0430\u043a\u043e\u0433\u043e",
-    "\u043d\u0443\u0436\u043d\u043e",
-    "\u043d\u0430\u0434\u043e",
+    "как",
+    "когда",
+    "кто",
+    "куда",
+    "где",
+    "зачем",
+    "почему",
+    "что",
+    "чего",
+    "какой",
+    "какая",
+    "какие",
+    "какого",
+    "нужно",
+    "надо",
 }
 LINK_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 TOKEN_RE = re.compile(r"[A-Za-z\u0400-\u04FF0-9_-]+")
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
-SUMMARY_EMPTY_MESSAGE = (
-    "\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e "
-    "\u0434\u0430\u043d\u043d\u044b\u0445 \u0434\u043b\u044f "
-    "\u0441\u0443\u043c\u043c\u0430\u0440\u0438\u0437\u0430\u0446\u0438\u0438."
-)
-TOPICS_TITLE = "\u0422\u0435\u043c\u044b"
-NOTABLE_TITLE = "\u0412\u0430\u0436\u043d\u043e\u0435"
+SUMMARY_EMPTY_MESSAGE = "Недостаточно данных для суммаризации."
+TOPICS_TITLE = "Темы"
+NOTABLE_TITLE = "Важное"
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -101,12 +105,39 @@ class PreparedSummaryMessage:
 
 
 class SummaryService:
-    def __init__(self, chat_history_service: ChatHistoryService, lookback_days: int | None = None):
+    def __init__(
+        self,
+        chat_history_service: ChatHistoryService,
+        lookback_days: int | None = None,
+        backend: str | None = None,
+        deepseek_api_key: str | None = None,
+        deepseek_model: str | None = None,
+        deepseek_base_url: str | None = None,
+        deepseek_timeout_seconds: int | None = None,
+        requests_session=None,
+    ):
         self.chat_history_service = chat_history_service
         settings = get_settings()
         self.lookback_days = (
             settings.summary_lookback_days if lookback_days is None else lookback_days
         )
+        self.backend = (backend or settings.summary_backend).strip().lower()
+        self.deepseek_api_key = (
+            settings.deepseek_api_key if deepseek_api_key is None else deepseek_api_key
+        )
+        self.deepseek_model = settings.deepseek_model if deepseek_model is None else deepseek_model
+        self.deepseek_base_url = (
+            settings.deepseek_base_url.rstrip("/")
+            if deepseek_base_url is None
+            else deepseek_base_url.rstrip("/")
+        )
+        self.deepseek_timeout_seconds = (
+            settings.deepseek_timeout_seconds
+            if deepseek_timeout_seconds is None
+            else deepseek_timeout_seconds
+        )
+        self.requests_session = requests_session or requests.Session()
+        self._deepseek_config_warning_emitted = False
 
     async def summarize_recent(self, chat_id: int) -> str:
         messages = await self.chat_history_service.get_messages(chat_id)
@@ -114,7 +145,109 @@ class SummaryService:
         prepared_messages = self.prepare_messages(recent_messages)
         if not prepared_messages:
             return SUMMARY_EMPTY_MESSAGE
+
+        if self.should_use_deepseek():
+            deepseek_summary = await self.try_deepseek_summary(prepared_messages)
+            if deepseek_summary:
+                return deepseek_summary
+
         return self.render_structured_summary(prepared_messages)
+
+    def should_use_deepseek(self) -> bool:
+        return self.backend == "deepseek"
+
+    def has_deepseek_config(self) -> bool:
+        return bool(self.deepseek_api_key and self.deepseek_model and self.deepseek_base_url)
+
+    async def try_deepseek_summary(
+        self,
+        prepared_messages: list[PreparedSummaryMessage],
+    ) -> str | None:
+        if not self.has_deepseek_config():
+            if not self._deepseek_config_warning_emitted:
+                logger.warning(
+                    "DeepSeek summarizer requested but not fully configured. Falling back to local."
+                )
+                self._deepseek_config_warning_emitted = True
+            return None
+
+        try:
+            summary = await asyncio.to_thread(
+                self.request_deepseek_summary,
+                prepared_messages,
+            )
+        except Exception:
+            logger.exception("DeepSeek summarization failed. Falling back to local.")
+            return None
+
+        cleaned_summary = summary.strip()
+        if not cleaned_summary:
+            logger.warning("DeepSeek summarizer returned an empty response. Falling back to local.")
+            return None
+        return cleaned_summary
+
+    def request_deepseek_summary(self, prepared_messages: list[PreparedSummaryMessage]) -> str:
+        prompt = self.build_deepseek_prompt(prepared_messages)
+        response = self.requests_session.post(
+            f"{self.deepseek_base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.deepseek_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.deepseek_model,
+                "temperature": 0.2,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Ты делаешь краткую сводку чата на русском языке. "
+                            "Возвращай только две секции: "
+                            "'Темы:' и 'Важное:'. "
+                            "В 'Темы' дай до 3 коротких тем без дублей. "
+                            "В 'Важное' дай до 4 самых существенных пунктов. "
+                            "Не добавляй вступление, выводы, markdown-кодблоки или лишние секции."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+            },
+            timeout=self.deepseek_timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload["choices"][0]["message"]["content"]
+
+    @classmethod
+    def build_transcript_for_llm(cls, prepared_messages: list[PreparedSummaryMessage]) -> str:
+        lines = [cls.format_transcript_line(message) for message in prepared_messages]
+        selected_lines: list[str] = []
+        total_length = 0
+
+        for line in reversed(lines):
+            line_length = len(line) + 1
+            if selected_lines and total_length + line_length > DEEPSEEK_MAX_TRANSCRIPT_CHARS:
+                break
+            selected_lines.append(line)
+            total_length += line_length
+
+        return "\n".join(reversed(selected_lines))
+
+    @classmethod
+    def build_deepseek_prompt(cls, prepared_messages: list[PreparedSummaryMessage]) -> str:
+        transcript = cls.build_transcript_for_llm(prepared_messages)
+        return (
+            "Сделай краткую сводку по этому фрагменту чата.\n"
+            "Формат ответа строго такой:\n"
+            "Темы:\n"
+            "- ...\n"
+            "- ...\n\n"
+            "Важное:\n"
+            "- ...\n"
+            "- ...\n\n"
+            "Вот сообщения:\n"
+            f"{transcript}"
+        )
 
     @staticmethod
     def normalize_text(text: str) -> str:
@@ -330,6 +463,62 @@ class SummaryService:
         second_tokens = second_message.topic_lemmas or second_message.lemmas
         return cls.similarity_ratio(first_tokens, second_tokens) >= SIMILARITY_THRESHOLD
 
+    @staticmethod
+    def sparse_cosine_similarity(
+        first_vector: dict[str, int],
+        second_vector: dict[str, int],
+    ) -> float:
+        if not first_vector or not second_vector:
+            return 0.0
+
+        shared_keys = set(first_vector) & set(second_vector)
+        if not shared_keys:
+            return 0.0
+
+        numerator = sum(first_vector[key] * second_vector[key] for key in shared_keys)
+        first_norm = sum(value * value for value in first_vector.values()) ** 0.5
+        second_norm = sum(value * value for value in second_vector.values()) ** 0.5
+        if first_norm == 0 or second_norm == 0:
+            return 0.0
+        return numerator / (first_norm * second_norm)
+
+    @staticmethod
+    def stems_look_related(first_topic: str, second_topic: str) -> bool:
+        shorter, longer = sorted((first_topic, second_topic), key=len)
+        if len(shorter) < 5:
+            return False
+        return longer.startswith(shorter)
+
+    @staticmethod
+    def build_topic_vector(topic: str) -> dict[str, int]:
+        normalized_topic = f"^{topic}$"
+        if len(normalized_topic) < 4:
+            return {normalized_topic: 1}
+
+        vector: dict[str, int] = {}
+        for index in range(len(normalized_topic) - 2):
+            gram = normalized_topic[index : index + 3]
+            vector[gram] = vector.get(gram, 0) + 1
+        return vector
+
+    @classmethod
+    def topics_are_related(
+        cls,
+        first_topic: str,
+        second_topic: str,
+        topic_vectors: dict[str, dict[str, int]],
+    ) -> bool:
+        if first_topic == second_topic:
+            return True
+        if cls.stems_look_related(first_topic, second_topic):
+            return True
+
+        lexical_similarity = cls.sparse_cosine_similarity(
+            topic_vectors.get(first_topic, {}),
+            topic_vectors.get(second_topic, {}),
+        )
+        return lexical_similarity >= TOPIC_CLUSTER_SIMILARITY_THRESHOLD
+
     @classmethod
     def extract_topics(cls, messages: list[PreparedSummaryMessage]) -> list[str]:
         topic_weights: dict[str, int] = {}
@@ -350,24 +539,71 @@ class SummaryService:
                 topic_message_counts[lemma] = topic_message_counts.get(lemma, 0) + 1
                 topic_speakers.setdefault(lemma, set()).add(message.speaker)
 
-        repeated_topics = {
-            topic: weight
-            for topic, weight in topic_weights.items()
-            if topic_message_counts.get(topic, 0) >= 2
-        }
-        selected_topics = repeated_topics or topic_weights
+        if not topic_weights:
+            return []
 
+        topic_vectors = {topic: cls.build_topic_vector(topic) for topic in topic_weights}
         ranked_topics = sorted(
-            selected_topics.items(),
+            topic_weights.items(),
             key=lambda item: (
                 -len(topic_speakers.get(item[0], set())),
                 -topic_message_counts.get(item[0], 0),
-                -item[1],
                 -len(item[0]),
+                -item[1],
                 item[0],
             ),
         )
-        return [topic for topic, _ in ranked_topics[:MAX_TOPICS]]
+
+        clusters: list[list[str]] = []
+        for topic, _ in ranked_topics:
+            matched_cluster = None
+            for cluster in clusters:
+                if any(
+                    cls.topics_are_related(topic, existing_topic, topic_vectors)
+                    for existing_topic in cluster
+                ):
+                    matched_cluster = cluster
+                    break
+
+            if matched_cluster is None:
+                clusters.append([topic])
+            else:
+                matched_cluster.append(topic)
+
+        topic_rank_positions = {topic: index for index, (topic, _) in enumerate(ranked_topics)}
+        ranked_cluster_topics: list[tuple[str, tuple[int, int, int, int, str]]] = []
+        for cluster in clusters:
+            cluster_weight = sum(topic_weights[topic] for topic in cluster)
+            cluster_message_count = sum(topic_message_counts.get(topic, 0) for topic in cluster)
+            cluster_speaker_count = len(
+                set().union(*(topic_speakers.get(topic, set()) for topic in cluster))
+            )
+            cluster_rank = min(topic_rank_positions.get(topic, 0) for topic in cluster)
+            representative = min(
+                cluster,
+                key=lambda topic: (
+                    -topic_message_counts.get(topic, 0),
+                    -len(topic_speakers.get(topic, set())),
+                    len(topic),
+                    -topic_weights[topic],
+                    topic,
+                ),
+            )
+            ranked_cluster_topics.append(
+                (
+                    representative,
+                    (
+                        -cluster_speaker_count,
+                        -cluster_message_count,
+                        cluster_rank,
+                        -cluster_weight,
+                        representative,
+                    ),
+                )
+            )
+
+        ranked_cluster_topics.sort(key=lambda item: item[1])
+        return [topic for topic, _ in ranked_cluster_topics[:MAX_TOPICS]]
 
     @classmethod
     def extract_notable_points(cls, messages: list[PreparedSummaryMessage]) -> list[str]:

@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import io
+import logging
+
 from repositories.message_image_ocr_repository import (
     MessageImageOCRRecord,
     MessageImageOCRRepository,
+    NO_OCR_TEXT,
+    PENDING_OCR_TEXT,
 )
 from services.ocr_service import OCRResult, OCRService
+
+logger = logging.getLogger(__name__)
 
 
 class MessageImageOCRService:
@@ -38,6 +45,14 @@ class MessageImageOCRService:
             parts.append(ocr_result.normalized_text)
         return " ".join(part for part in parts if part).strip()
 
+    @staticmethod
+    def get_ocr_raw_text(ocr_result: OCRResult | None, ocr_attempted: bool) -> str:
+        if ocr_result is not None:
+            return ocr_result.raw_text
+        if ocr_attempted:
+            return NO_OCR_TEXT
+        return PENDING_OCR_TEXT
+
     def save_message_image(
         self,
         *,
@@ -53,10 +68,10 @@ class MessageImageOCRService:
         file_id: str,
         file_unique_id: str,
         ocr_result: OCRResult | None,
+        ocr_attempted: bool,
     ) -> bool:
         search_text = self.build_search_text(caption_text, ocr_result)
-        if not search_text:
-            return False
+        ocr_raw_text = self.get_ocr_raw_text(ocr_result, ocr_attempted)
 
         self.repository.save_record(
             MessageImageOCRRecord(
@@ -70,10 +85,46 @@ class MessageImageOCRService:
                 user_name=user_name,
                 message_date=message_date,
                 caption_text=caption_text,
-                ocr_raw_text=ocr_result.raw_text if ocr_result else "",
+                ocr_raw_text=ocr_raw_text,
                 search_text=search_text,
                 file_id=file_id,
                 file_unique_id=file_unique_id,
             )
         )
-        return True
+        return bool(search_text) or ocr_raw_text == PENDING_OCR_TEXT
+
+    async def backfill_pending_images(self, bot, limit: int | None = None) -> int:
+        if not self.ocr_service.is_available:
+            return 0
+
+        pending_records = self.repository.get_pending_records(limit=limit)
+        processed_count = 0
+        for record in pending_records:
+            try:
+                telegram_file = await bot.get_file(record.file_id)
+                file_io = io.BytesIO()
+                await bot.download_file(telegram_file.file_path, destination=file_io)
+                ocr_result = self.ocr_service.extract_text(file_io)
+                self.save_message_image(
+                    chat_id=record.chat_id,
+                    chat_name=record.chat_name,
+                    chat_username=record.chat_username,
+                    chat_type=record.chat_type,
+                    message_id=record.message_id,
+                    message_date=record.message_date,
+                    user_id=record.user_id,
+                    user_name=record.user_name,
+                    caption_text=record.caption_text,
+                    file_id=record.file_id,
+                    file_unique_id=record.file_unique_id,
+                    ocr_result=ocr_result,
+                    ocr_attempted=True,
+                )
+                processed_count += 1
+            except Exception:
+                logger.exception(
+                    "Failed OCR backfill for chat_id=%s message_id=%s",
+                    record.chat_id,
+                    record.message_id,
+                )
+        return processed_count

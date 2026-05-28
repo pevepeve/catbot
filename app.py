@@ -35,6 +35,15 @@ async def anime_schedule_refresh_loop(bot: Bot, admin_id: int) -> None:
         await asyncio.sleep(ANIME_REFRESH_CHECK_INTERVAL_SECONDS)
 
 
+async def ocr_backfill_once(bot: Bot) -> None:
+    if not catbot_user.ocr_service.is_available:
+        return
+
+    processed = await catbot_user.message_image_ocr_service.backfill_pending_images(bot)
+    if processed:
+        logging.info("OCR backfill completed: processed=%s", processed)
+
+
 async def main():
     settings = get_settings()
     init_db()
@@ -59,11 +68,17 @@ async def main():
         anime_schedule_refresh_loop(bot, settings.admin_id),
         name="anime-schedule-refresh",
     )
+    ocr_backfill_task = asyncio.create_task(
+        ocr_backfill_once(bot),
+        name="ocr-backfill",
+    )
     try:
         await dispatcher.start_polling(bot)
     finally:
         refresh_task.cancel()
-        await asyncio.gather(refresh_task, return_exceptions=True)
+        if not ocr_backfill_task.done():
+            ocr_backfill_task.cancel()
+        await asyncio.gather(refresh_task, ocr_backfill_task, return_exceptions=True)
 
 
 if __name__ == "__main__":

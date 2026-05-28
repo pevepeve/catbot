@@ -17,6 +17,37 @@ class FakeChatHistoryService:
         return self.messages
 
 
+class FakeDeepSeekResponse:
+    def __init__(self, content: str):
+        self.content = content
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {"choices": [{"message": {"content": self.content}}]}
+
+
+class FakeDeepSeekSession:
+    def __init__(self, content: str):
+        self.content = content
+        self.last_request = None
+
+    def post(self, url, headers=None, json=None, timeout=None):
+        self.last_request = {
+            "url": url,
+            "headers": headers,
+            "json": json,
+            "timeout": timeout,
+        }
+        return FakeDeepSeekResponse(self.content)
+
+
+class FailingDeepSeekSession:
+    def post(self, url, headers=None, json=None, timeout=None):
+        raise RuntimeError("deepseek unavailable")
+
+
 def build_message(
     message_id: int,
     user_name: str,
@@ -73,6 +104,66 @@ def test_structured_summary_keeps_only_topics_and_notable():
     assert "[10:02] bob: Yes, deploy after config fix" in summary
 
 
+def test_deepseek_summary_is_used_when_configured():
+    messages = [
+        build_message(1, "alice", "Need release plan for deploy today?", "2026-05-28T10:00:00+03:00"),
+        build_message(2, "bob", "Yes, deploy after config fix", "2026-05-28T10:02:00+03:00"),
+    ]
+    session = FakeDeepSeekSession("Темы:\n- релиз\n\nВажное:\n- обсудили выкладку")
+    service = SummaryService(
+        FakeChatHistoryService(messages),
+        backend="deepseek",
+        deepseek_api_key="secret",
+        deepseek_model="deepseek-chat",
+        deepseek_base_url="https://api.deepseek.com",
+        requests_session=session,
+    )
+
+    summary = asyncio.run(service.summarize_recent(1))
+
+    assert summary == "Темы:\n- релиз\n\nВажное:\n- обсудили выкладку"
+    assert session.last_request["url"] == "https://api.deepseek.com/chat/completions"
+    assert session.last_request["json"]["model"] == "deepseek-chat"
+
+
+def test_deepseek_missing_key_falls_back_to_local():
+    messages = [
+        build_message(1, "alice", "Need release plan for deploy today?", "2026-05-28T10:00:00+03:00"),
+        build_message(2, "bob", "Yes, deploy after config fix", "2026-05-28T10:02:00+03:00"),
+    ]
+    service = SummaryService(
+        FakeChatHistoryService(messages),
+        backend="deepseek",
+        deepseek_api_key=None,
+        requests_session=FakeDeepSeekSession("should not be used"),
+    )
+
+    summary = asyncio.run(service.summarize_recent(1))
+
+    assert f"{TOPICS_TITLE}:" in summary
+    assert f"{NOTABLE_TITLE}:" in summary
+
+
+def test_deepseek_failure_falls_back_to_local():
+    messages = [
+        build_message(1, "alice", "Need release plan for deploy today?", "2026-05-28T10:00:00+03:00"),
+        build_message(2, "bob", "Yes, deploy after config fix", "2026-05-28T10:02:00+03:00"),
+    ]
+    service = SummaryService(
+        FakeChatHistoryService(messages),
+        backend="deepseek",
+        deepseek_api_key="secret",
+        deepseek_model="deepseek-chat",
+        deepseek_base_url="https://api.deepseek.com",
+        requests_session=FailingDeepSeekSession(),
+    )
+
+    summary = asyncio.run(service.summarize_recent(1))
+
+    assert f"{TOPICS_TITLE}:" in summary
+    assert f"{NOTABLE_TITLE}:" in summary
+
+
 def test_topic_extraction_uses_external_stopwords():
     messages = [
         build_message(
@@ -106,7 +197,8 @@ def test_topic_extraction_uses_external_stopwords():
 
     assert "\u0442\u0430\u043a\u043e\u0439" not in topics
     assert "\u0431\u044b\u0442\u044c" not in topics
-    assert "\u043a\u0440\u0438\u043f\u0442\u043e\u0434\u043e\u043b\u043b\u0430\u0440" in topics
+    assert "\u043a\u0440\u0438\u043f\u0442\u0430" in topics
+    assert "\u043a\u0440\u0438\u043f\u0442\u043e\u0434\u043e\u043b\u043b\u0430\u0440" not in topics
 
 
 def test_extract_notable_points_skips_near_duplicates():
@@ -121,6 +213,46 @@ def test_extract_notable_points_skips_near_duplicates():
 
     assert len(notable_points) == 2
     assert any("Config fix is ready for production" in point for point in notable_points)
+
+
+def test_extract_topics_clusters_related_terms():
+    messages = [
+        build_message(
+            1,
+            "alice",
+            "\u041e\u043f\u0435\u043d\u0441\u043e\u0440\u0441 "
+            "\u0441\u0435\u0442\u044c \u0434\u043b\u044f "
+            "\u043a\u0440\u0438\u043f\u0442\u044b \u0438 "
+            "\u043a\u0440\u0438\u043f\u0442\u043e\u0434\u043e\u043b\u043b\u0430\u0440\u0430",
+            "2026-05-28T10:00:00+03:00",
+        ),
+        build_message(
+            2,
+            "bob",
+            "\u041a\u0440\u0438\u043f\u0442\u0430 \u0438 "
+            "\u043a\u0440\u0438\u043f\u0442\u043e\u0434\u043e\u043b\u043b\u0430\u0440 "
+            "\u0432 \u044d\u0442\u043e\u0439 \u0441\u0435\u0442\u0438",
+            "2026-05-28T10:01:00+03:00",
+        ),
+        build_message(
+            3,
+            "carol",
+            "\u041c\u043e\u043d\u0435\u0442\u0430 "
+            "\u043a\u0440\u0438\u043f\u0442\u0430 \u0438 "
+            "\u0441\u0435\u0442\u044c \u0441\u043d\u043e\u0432\u0430 "
+            "\u043e\u0431\u0441\u0443\u0436\u0434\u0430\u044e\u0442\u0441\u044f",
+            "2026-05-28T10:02:00+03:00",
+        ),
+    ]
+
+    prepared = SummaryService.prepare_messages(messages)
+    topics = SummaryService.extract_topics(prepared)
+
+    assert "\u043e\u043f\u0435\u043d\u0441\u043e\u0440\u0441" in topics
+    assert "\u043a\u0440\u0438\u043f\u0442\u0430" in topics
+    assert "\u0441\u0435\u0442\u044c" in topics
+    assert "\u043a\u0440\u0438\u043f\u0442\u043e\u0434\u043e\u043b\u043b\u0430\u0440" not in topics
+    assert "\u043c\u043e\u043d\u0435\u0442\u0430" not in topics
 
 
 def test_filter_recent_messages_excludes_stale_history():

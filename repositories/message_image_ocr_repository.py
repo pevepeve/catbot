@@ -7,6 +7,9 @@ from config import get_settings
 from infrastructure.db import SessionLocal
 from models.orm import MessageImageOCR
 
+PENDING_OCR_TEXT = "__PENDING_OCR__"
+NO_OCR_TEXT = "__NO_OCR_TEXT__"
+
 
 @dataclass(frozen=True)
 class MessageImageOCRRecord:
@@ -91,5 +94,40 @@ class MessageImageOCRRepository:
                 )
             )
             session.commit()
+        finally:
+            session.close()
+
+    @staticmethod
+    def _to_record(row: MessageImageOCR) -> MessageImageOCRRecord:
+        return MessageImageOCRRecord(
+            chat_id=row.chat_id,
+            chat_name=row.chat_name or "",
+            chat_username=row.chat_username or "",
+            chat_type=row.chat_type or "",
+            message_id=row.message_id,
+            message_link=row.message_link or "",
+            user_id=row.user_id,
+            user_name=row.user_name or "",
+            message_date=row.message_date or "",
+            caption_text=row.caption_text or "",
+            ocr_raw_text=row.ocr_raw_text or "",
+            search_text=row.search_text or "",
+            file_id=row.file_id or "",
+            file_unique_id=row.file_unique_id or "",
+        )
+
+    def get_pending_records(self, limit: Optional[int] = None) -> list[MessageImageOCRRecord]:
+        session = self.session_factory()
+        try:
+            statement = (
+                select(MessageImageOCR)
+                .where(MessageImageOCR.ocr_raw_text == PENDING_OCR_TEXT)
+                .order_by(asc(MessageImageOCR.id))
+            )
+            if limit is not None:
+                statement = statement.limit(limit)
+
+            rows = session.execute(statement).scalars().all()
+            return [self._to_record(row) for row in rows]
         finally:
             session.close()
