@@ -4,6 +4,7 @@ joblib
 nltk
 numpy
 Pillow
+pytesseract
 pymorphy3
 python-dotenv
 python-telegram-bot

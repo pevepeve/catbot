@@ -44,6 +44,8 @@ async def main():
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         stream=sys.stdout,
     )
+    if catbot_user.ocr_service.startup_warning:
+        logging.warning(catbot_user.ocr_service.startup_warning)
 
     bot = Bot(
         token=settings.api_token,

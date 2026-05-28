@@ -1,4 +1,6 @@
+import io
 from html import escape
+import logging
 
 from aiogram import Dispatcher, F, Router
 from aiogram.enums import ChatMemberStatus, ChatType, ParseMode
@@ -16,11 +18,18 @@ from emoji import emojize
 from sqlalchemy.exc import NoResultFound
 
 import texts
-from repositories import AnimeRepository, MessageRepository, NekoRepository
+from repositories import (
+    AnimeRepository,
+    MessageImageOCRRepository,
+    MessageRepository,
+    NekoRepository,
+)
 from services import (
     AnimeService,
     ChatHistoryService,
+    MessageImageOCRService,
     NekoService,
+    OCRService,
     SummaryService,
 )
 from ui import get_keyboard_animes, get_keyboard_close_detail, get_keyboard_days
@@ -38,6 +47,12 @@ anime_service = AnimeService(AnimeRepository())
 chat_history_service = ChatHistoryService(MessageRepository())
 summary_service = SummaryService(chat_history_service)
 neko_service = NekoService(NekoRepository())
+ocr_service = OCRService()
+message_image_ocr_service = MessageImageOCRService(
+    MessageImageOCRRepository(),
+    ocr_service,
+)
+logger = logging.getLogger(__name__)
 
 
 def split_callback_owner(callback_data: str) -> tuple[str, int | None]:
@@ -165,6 +180,18 @@ async def persist_uploaded_thumbnail(anime_title: dict, message: Message) -> Non
         message.photo[-1].file_id,
         anime_title["image"],
     )
+
+
+def get_chat_type_value(chat_type) -> str:
+    return getattr(chat_type, "value", str(chat_type))
+
+
+def get_media_source(message: Message):
+    if message.photo:
+        return message.photo[-1]
+    if message.document and (message.document.mime_type or "").startswith("image/"):
+        return message.document
+    return None
 
 
 @router.callback_query(F.data.startswith("weekday_") | F.data.startswith("back_"))
@@ -371,6 +398,57 @@ async def cmd_tldr(message: Message):
     )
 
 
+@router.message(F.photo | F.document)
+async def index_image_message(message: Message):
+    media_source = get_media_source(message)
+    if media_source is None:
+        return
+
+    caption_text = message.caption or ""
+    if message.from_user:
+        speaker_name = message.from_user.username or message.from_user.full_name
+        user_id = message.from_user.id
+    else:
+        speaker_name = "Unknown"
+        user_id = None
+
+    ocr_result = None
+    if ocr_service.is_available:
+        file_io = io.BytesIO()
+        try:
+            await message.bot.download(media_source, destination=file_io)
+            ocr_result = ocr_service.extract_text(file_io)
+        except Exception:
+            logger.exception(
+                "Failed OCR indexing for chat_id=%s message_id=%s",
+                message.chat.id,
+                message.message_id,
+            )
+            ocr_result = None
+
+    try:
+        message_image_ocr_service.save_message_image(
+            chat_id=message.chat.id,
+            chat_name=message.chat.title or message.chat.full_name or "",
+            chat_username=message.chat.username or "",
+            chat_type=get_chat_type_value(message.chat.type),
+            message_id=message.message_id,
+            message_date=message.date.isoformat(),
+            user_id=user_id,
+            user_name=speaker_name,
+            caption_text=caption_text,
+            file_id=media_source.file_id,
+            file_unique_id=media_source.file_unique_id,
+            ocr_result=ocr_result,
+        )
+    except Exception:
+        logger.exception(
+            "Failed saving image OCR index for chat_id=%s message_id=%s",
+            message.chat.id,
+            message.message_id,
+        )
+
+
 @router.message(F.text.regexp(r"(^кек$)"))
 async def kek(message: Message):
     await message.answer(texts.KEK)
@@ -395,7 +473,7 @@ async def textsave(message: Message):
         chat_id=message.chat.id,
         chat_name=message.chat.title or message.chat.full_name or "",
         chat_username=message.chat.username or "",
-        chat_type=getattr(message.chat.type, "value", message.chat.type),
+        chat_type=get_chat_type_value(message.chat.type),
         message_id=message.message_id,
         user_id=user_id,
         user_name=speaker_name,
