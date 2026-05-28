@@ -55,7 +55,7 @@ def test_prepare_messages_filters_noise_and_extracts_metadata():
     assert prepared[0].is_question is True
 
 
-def test_structured_summary_includes_topics_questions_and_replies():
+def test_structured_summary_keeps_only_topics_and_notable():
     messages = [
         build_message(1, "alice", "Need release plan for deploy today?", "2026-05-28T10:00:00+03:00"),
         build_message(2, "bob", "Yes, deploy after config fix", "2026-05-28T10:02:00+03:00", reply_to_message_id=1),
@@ -67,9 +67,25 @@ def test_structured_summary_includes_topics_questions_and_replies():
 
     assert "Темы:" in summary
     assert "Важное:" in summary
-    assert "Вопросы:" in summary
-    assert "Ответы / треды:" in summary
-    assert "[10:02] bob -> alice: Yes, deploy after config fix" in summary
+    assert "Вопросы:" not in summary
+    assert "Ответы / треды:" not in summary
+    assert "Открыто:" not in summary
+    assert "[10:02] bob: Yes, deploy after config fix" in summary
+
+
+def test_topic_extraction_skips_generic_words():
+    messages = [
+        build_message(1, "alice", "Это такой криптодоллар, почти как стейблкоин", "2026-05-28T10:00:00+03:00"),
+        build_message(2, "bob", "Криптодоллар и крипта снова обсуждаются", "2026-05-28T10:02:00+03:00"),
+        build_message(3, "carol", "Такой подход к крипте спорный", "2026-05-28T10:03:00+03:00"),
+    ]
+
+    prepared = SummaryService.prepare_messages(messages)
+    topics = SummaryService.extract_topics(prepared)
+
+    assert "такой" not in topics
+    assert "быть" not in topics
+    assert "криптодоллар" in topics
 
 
 def test_filter_recent_messages_excludes_stale_history():

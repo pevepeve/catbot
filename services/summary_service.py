@@ -23,9 +23,6 @@ except ImportError:  # pragma: no cover - optional dependency in local dev
 NOISE_MESSAGE_MIN_LEN = 2
 MAX_TOPICS = 5
 MAX_NOTABLE_POINTS = 4
-MAX_QUESTIONS = 4
-MAX_REPLY_THREADS = 4
-MAX_OPEN_QUESTIONS = 3
 QUESTION_WORDS = {
     "как",
     "когда",
@@ -75,6 +72,35 @@ STOPWORDS = {
     "нужно",
     "будет",
     "будут",
+    "такой",
+    "такое",
+    "такая",
+    "такие",
+    "быть",
+    "есть",
+    "весь",
+    "вся",
+    "сам",
+    "сама",
+    "свой",
+    "свои",
+    "этот",
+    "эта",
+    "эти",
+    "тот",
+    "можно",
+    "мочь",
+    "стать",
+    "делать",
+    "сделать",
+    "сказать",
+    "говорить",
+    "идти",
+    "пойти",
+    "хотеть",
+    "знать",
+    "думать",
+    "видеть",
     "просто",
     "типа",
     "блин",
@@ -116,6 +142,7 @@ class PreparedSummaryMessage:
     normalized_text: str
     reply_to_message_id: int | None
     lemmas: tuple[str, ...]
+    topic_lemmas: tuple[str, ...]
     is_question: bool
     is_reply: bool
     has_link: bool
@@ -191,6 +218,12 @@ class SummaryService:
             return cleaned_token
         return MORPH.parse(cleaned_token)[0].normal_form
 
+    @staticmethod
+    def get_token_pos(token: str) -> str | None:
+        if MORPH is None or not CYRILLIC_RE.search(token):
+            return None
+        return MORPH.parse(token)[0].tag.POS
+
     @classmethod
     def is_meaningful_token(cls, token: str) -> bool:
         if len(token) < 3 and not token.isdigit():
@@ -202,6 +235,18 @@ class SummaryService:
         return bool(re.search(r"[A-Za-zА-Яа-яЁё0-9]", token))
 
     @classmethod
+    def is_topic_token(cls, token: str) -> bool:
+        if token.isdigit() or len(token) < 4:
+            return False
+        if token in STOPWORDS:
+            return False
+
+        pos = cls.get_token_pos(token)
+        if pos is None:
+            return True
+        return pos in {"NOUN", "PROPN"}
+
+    @classmethod
     def extract_lemmas(cls, text: str) -> tuple[str, ...]:
         lemmas = []
         for token in cls.tokenize_text(text):
@@ -209,6 +254,10 @@ class SummaryService:
             if normalized and cls.is_meaningful_token(normalized):
                 lemmas.append(normalized)
         return tuple(lemmas)
+
+    @classmethod
+    def extract_topic_lemmas(cls, lemmas: Iterable[str]) -> tuple[str, ...]:
+        return tuple(lemma for lemma in lemmas if cls.is_topic_token(lemma))
 
     @classmethod
     def should_skip_message(cls, message: ChatMessageRecord) -> bool:
@@ -261,6 +310,7 @@ class SummaryService:
 
             normalized_text = cls.normalize_text(message.text)
             lemmas = cls.extract_lemmas(normalized_text)
+            topic_lemmas = cls.extract_topic_lemmas(lemmas)
             if not lemmas and not LINK_RE.search(normalized_text) and "?" not in normalized_text:
                 continue
 
@@ -283,6 +333,7 @@ class SummaryService:
                     normalized_text=normalized_text,
                     reply_to_message_id=message.reply_to_message_id,
                     lemmas=lemmas,
+                    topic_lemmas=topic_lemmas,
                     is_question=is_question,
                     is_reply=is_reply,
                     has_link=has_link,
@@ -298,14 +349,24 @@ class SummaryService:
     @classmethod
     def extract_topics(cls, messages: list[PreparedSummaryMessage]) -> list[str]:
         topic_scores: dict[str, int] = {}
+        topic_message_counts: dict[str, int] = {}
         for message in messages:
             if message.score < 3:
                 continue
-            for lemma in set(message.lemmas):
+            for lemma in set(message.topic_lemmas):
                 topic_scores[lemma] = topic_scores.get(lemma, 0) + 1
+                topic_message_counts[lemma] = topic_message_counts.get(lemma, 0) + 1
+
+        filtered_topics = {
+            topic: score
+            for topic, score in topic_scores.items()
+            if topic_message_counts.get(topic, 0) >= 2
+        }
+        if not filtered_topics:
+            filtered_topics = topic_scores
 
         ranked_topics = sorted(
-            topic_scores.items(),
+            filtered_topics.items(),
             key=lambda item: (-item[1], -len(item[0]), item[0]),
         )
         return [topic for topic, _ in ranked_topics[:MAX_TOPICS]]
@@ -327,55 +388,6 @@ class SummaryService:
                 break
         return notable_points
 
-    @classmethod
-    def extract_questions(cls, messages: list[PreparedSummaryMessage]) -> list[str]:
-        questions = [
-            cls.format_transcript_line(message)
-            for message in messages
-            if message.is_question
-        ]
-        return questions[:MAX_QUESTIONS]
-
-    @classmethod
-    def extract_reply_threads(cls, messages: list[PreparedSummaryMessage]) -> list[str]:
-        message_by_id = {
-            message.message_id: message
-            for message in messages
-            if message.message_id is not None
-        }
-        reply_threads = []
-        for message in messages:
-            if message.reply_to_message_id is None:
-                continue
-            parent_message = message_by_id.get(message.reply_to_message_id)
-            if parent_message is None:
-                continue
-            reply_threads.append(
-                f"[{message.timestamp}] {message.speaker} -> "
-                f"{parent_message.speaker}: {message.normalized_text}"
-            )
-            if len(reply_threads) >= MAX_REPLY_THREADS:
-                break
-        return reply_threads
-
-    @classmethod
-    def extract_open_questions(cls, messages: list[PreparedSummaryMessage]) -> list[str]:
-        replied_question_ids = {
-            message.reply_to_message_id
-            for message in messages
-            if message.reply_to_message_id is not None
-        }
-        open_questions = []
-        for message in messages:
-            if not message.is_question or message.message_id is None:
-                continue
-            if message.message_id in replied_question_ids:
-                continue
-            open_questions.append(message.normalized_text)
-            if len(open_questions) >= MAX_OPEN_QUESTIONS:
-                break
-        return open_questions
-
     @staticmethod
     def render_section(title: str, items: list[str]) -> str:
         return title + ":\n" + "\n".join(f"- {item}" for item in items)
@@ -384,21 +396,12 @@ class SummaryService:
     def render_structured_summary(cls, messages: list[PreparedSummaryMessage]) -> str:
         topics = cls.extract_topics(messages)
         notable_points = cls.extract_notable_points(messages)
-        questions = cls.extract_questions(messages)
-        reply_threads = cls.extract_reply_threads(messages)
-        open_questions = cls.extract_open_questions(messages)
 
         sections = []
         if topics:
             sections.append(cls.render_section("Темы", topics))
         if notable_points:
             sections.append(cls.render_section("Важное", notable_points))
-        if questions:
-            sections.append(cls.render_section("Вопросы", questions))
-        if reply_threads:
-            sections.append(cls.render_section("Ответы / треды", reply_threads))
-        if open_questions:
-            sections.append(cls.render_section("Открыто", open_questions))
 
         if not sections:
             return "Недостаточно данных для суммаризации."
