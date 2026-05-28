@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -69,6 +70,21 @@ def test_structured_summary_includes_topics_questions_and_replies():
     assert "Вопросы:" in summary
     assert "Ответы / треды:" in summary
     assert "[10:02] bob -> alice: Yes, deploy after config fix" in summary
+
+
+def test_filter_recent_messages_excludes_stale_history():
+    messages = [
+        build_message(1, "alice", "old deploy note", "2026-05-20T10:00:00+00:00"),
+        build_message(2, "bob", "fresh release plan?", "2026-05-27T12:00:00+00:00"),
+    ]
+
+    filtered = SummaryService.filter_recent_messages(
+        messages,
+        lookback_days=3,
+        now=datetime(2026, 5, 28, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert [message.message_id for message in filtered] == [2]
 
 
 def test_message_repository_keeps_last_messages_per_chat():

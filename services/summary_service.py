@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
+from config import get_settings
 from repositories.message_repository import ChatMessageRecord
 from services.chat_history_service import ChatHistoryService
 
@@ -121,12 +123,17 @@ class PreparedSummaryMessage:
 
 
 class SummaryService:
-    def __init__(self, chat_history_service: ChatHistoryService):
+    def __init__(self, chat_history_service: ChatHistoryService, lookback_days: int | None = None):
         self.chat_history_service = chat_history_service
+        settings = get_settings()
+        self.lookback_days = (
+            settings.summary_lookback_days if lookback_days is None else lookback_days
+        )
 
     async def summarize_recent(self, chat_id: int) -> str:
         messages = await self.chat_history_service.get_messages(chat_id)
-        prepared_messages = self.prepare_messages(messages)
+        recent_messages = self.filter_recent_messages(messages, self.lookback_days)
+        prepared_messages = self.prepare_messages(recent_messages)
         if not prepared_messages:
             return "Недостаточно данных для суммаризации."
         return self.render_structured_summary(prepared_messages)
@@ -138,6 +145,36 @@ class SummaryService:
     @staticmethod
     def extract_timestamp(created_at: str) -> str:
         return created_at[11:16] if len(created_at) >= 16 else "??:??"
+
+    @staticmethod
+    def parse_created_at(created_at: str) -> datetime | None:
+        if not created_at:
+            return None
+        try:
+            parsed = datetime.fromisoformat(created_at)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    @classmethod
+    def filter_recent_messages(
+        cls,
+        messages: list[ChatMessageRecord],
+        lookback_days: int,
+        now: datetime | None = None,
+    ) -> list[ChatMessageRecord]:
+        current_time = now or datetime.now(timezone.utc)
+        threshold = current_time - timedelta(days=lookback_days)
+        recent_messages = []
+        for message in messages:
+            created_at = cls.parse_created_at(message.created_at)
+            if created_at is None:
+                continue
+            if created_at >= threshold:
+                recent_messages.append(message)
+        return recent_messages
 
     @staticmethod
     def tokenize_text(text: str) -> list[str]:
