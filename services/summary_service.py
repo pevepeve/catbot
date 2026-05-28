@@ -127,6 +127,48 @@ PROMPT_INJECTION_PATTERNS = (
         ),
         3,
     ),
+    (
+        re.compile(
+            r"(love\s+pliny|/l\\?o/v\\?e/\s*/?p/l\\?i/n\\?y|l\|o\|v\|e\s+p\|l\|i\|n\|y)",
+            re.IGNORECASE,
+        ),
+        5,
+    ),
+    (
+        re.compile(
+            r"(\b!?(?:g[o0]d\s*m[o0]d[e3]|g0dm0d3)\b|\{\s*g[o0]d\s*m[o0]d[e3]\s*:\s*enabled\s*\})",
+            re.IGNORECASE,
+        ),
+        5,
+    ),
+    (
+        re.compile(
+            r"(\bthe\s+libertas\s+factor\s+is\s+now\b|\blibertas\s+factor\b|\bl1b3rt[4a]s\b)",
+            re.IGNORECASE,
+        ),
+        4,
+    ),
+    (
+        re.compile(
+            r"(\b!omni\b|\bplinian\s+omniverse\b|\bfreeai\b)",
+            re.IGNORECASE,
+        ),
+        4,
+    ),
+    (
+        re.compile(
+            r"(\breset_cortex\b|\[end of input\]\s*\[start of input\]|\bcore_rule\b|\buserinput\s*[→\-:]+\s*rule\b)",
+            re.IGNORECASE,
+        ),
+        4,
+    ),
+    (
+        re.compile(
+            r"never\s+say.{0,40}(sorry|i\s+can'?t|i\s+apologize)",
+            re.IGNORECASE,
+        ),
+        4,
+    ),
 )
 SUMMARY_EMPTY_MESSAGE = "Недостаточно данных для суммаризации."
 TOPICS_TITLE = "Темы"
