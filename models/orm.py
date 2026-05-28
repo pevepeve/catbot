@@ -26,8 +26,16 @@ class SavedMessage(Base):
 
     id = Column(Integer, primary_key=True)
     chatid = Column(Integer)
+    chat_name = Column(String(255))
+    chat_username = Column(String(255))
+    chat_type = Column(String(32))
+    message_id = Column(Integer)
+    user_id = Column(Integer)
+    user_name = Column(String(255))
+    reply_to_message_id = Column(Integer)
     text = Column(Text)
     date = Column(String(255))
+    content_type = Column(String(32))
 
 
 # Backward-compatible aliases for existing imports.

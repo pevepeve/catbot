@@ -366,7 +366,7 @@ async def cmd_animeschedules(message: Message):
 async def cmd_tldr(message: Message):
     summary = await summary_service.summarize_recent(message.chat.id)
     await message.answer(
-        texts.TLDR_PREFIX + summary,
+        texts.TLDR_PREFIX + escape(summary),
         parse_mode=ParseMode.HTML,
     )
 
@@ -376,9 +376,34 @@ async def kek(message: Message):
     await message.answer(texts.KEK)
 
 
-@router.message(F.text)
+@router.message(F.text | F.caption)
 async def textsave(message: Message):
-    await chat_history_service.save_message(message.text, message.date, message.chat.id)
+    content = message.text or message.caption
+    if not content:
+        return
+
+    if message.from_user:
+        speaker_name = message.from_user.username or message.from_user.full_name
+        user_id = message.from_user.id
+    else:
+        speaker_name = "Unknown"
+        user_id = None
+
+    await chat_history_service.save_message(
+        text=content,
+        message_date=message.date.isoformat(),
+        chat_id=message.chat.id,
+        chat_name=message.chat.title or message.chat.full_name or "",
+        chat_username=message.chat.username or "",
+        chat_type=getattr(message.chat.type, "value", message.chat.type),
+        message_id=message.message_id,
+        user_id=user_id,
+        user_name=speaker_name,
+        reply_to_message_id=(
+            message.reply_to_message.message_id if message.reply_to_message else None
+        ),
+        content_type="caption" if message.caption else "text",
+    )
 
 
 def register_handlers_user(dispatcher: Dispatcher):
