@@ -49,6 +49,7 @@ Optional variables:
 - `DEEPSEEK_BASE_URL` - DeepSeek API base URL, default `https://api.deepseek.com`
 - `DEEPSEEK_MODEL` - DeepSeek chat model name, default `deepseek-chat`
 - `DEEPSEEK_TIMEOUT_SECONDS` - timeout for DeepSeek summary requests, default `30`
+- `LOG_UNHANDLED_UPDATES` - when `true`, poll all Telegram update types and log full payloads for updates that no handler consumed, default `false`
 
 Example `.env`:
 
@@ -67,6 +68,7 @@ DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
 DEEPSEEK_TIMEOUT_SECONDS=30
+LOG_UNHANDLED_UPDATES=false
 ```
 
 If `SUMMARY_BACKEND=deepseek` but DeepSeek is not configured or the API request fails, CatBot automatically falls back to the local summarizer.
