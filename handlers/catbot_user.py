@@ -391,9 +391,14 @@ async def cmd_animeschedules(message: Message):
 
 @router.message(Command("tldr"))
 async def cmd_tldr(message: Message):
-    summary = await summary_service.summarize_recent(message.chat.id)
+    summary_response = await summary_service.summarize_recent_response(message.chat.id)
+    response_text = (
+        texts.TLDR_PREFIX + escape(summary_response.text)
+        if summary_response.include_prefix
+        else escape(summary_response.text)
+    )
     await message.answer(
-        texts.TLDR_PREFIX + escape(summary),
+        response_text,
         parse_mode=ParseMode.HTML,
     )
 

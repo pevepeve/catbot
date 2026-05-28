@@ -12,6 +12,10 @@ from typing import Iterable
 import requests
 
 from config import get_settings
+from repositories.deepseek_summary_usage_repository import (
+    DeepSeekSummaryUsageRecord,
+    DeepSeekSummaryUsageRepository,
+)
 from repositories.message_repository import ChatMessageRecord
 from services.chat_history_service import ChatHistoryService
 
@@ -34,6 +38,8 @@ NOTABLE_SCORE_MIN = 3
 SIMILARITY_THRESHOLD = 0.65
 TOPIC_CLUSTER_SIMILARITY_THRESHOLD = 0.45
 DEEPSEEK_MAX_TRANSCRIPT_CHARS = 12000
+DEEPSEEK_MIN_SUMMARY_INTERVAL = timedelta(minutes=30)
+DEEPSEEK_MIN_NEW_MESSAGES = 100
 PROMPT_INJECTION_FILTER_SCORE = 3
 PROMPT_INJECTION_FALLBACK_SCORE = 5
 QUESTION_WORDS = {
@@ -173,6 +179,12 @@ PROMPT_INJECTION_PATTERNS = (
 SUMMARY_EMPTY_MESSAGE = "Недостаточно данных для суммаризации."
 TOPICS_TITLE = "Темы"
 NOTABLE_TITLE = "Важное"
+DEEPSEEK_LIMIT_MESSAGE_TEMPLATE = (
+    "Сводка DeepSeek для этого чата доступна не чаще одного раза в 30 минут "
+    "и только после 100 новых сообщений.\n"
+    "Сейчас осталось подождать: {minutes_left} мин.\n"
+    "Новых сообщений не хватает: {messages_left}."
+)
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +240,19 @@ class PromptInjectionCheckResult:
     should_fallback_to_local: bool
 
 
+@dataclass(frozen=True)
+class DeepSeekSummaryLimitStatus:
+    allowed: bool
+    minutes_left: int
+    messages_left: int
+
+
+@dataclass(frozen=True)
+class SummaryResponse:
+    text: str
+    include_prefix: bool = True
+
+
 class SummaryService:
     def __init__(
         self,
@@ -238,6 +263,7 @@ class SummaryService:
         deepseek_model: str | None = None,
         deepseek_base_url: str | None = None,
         deepseek_timeout_seconds: int | None = None,
+        deepseek_summary_usage_repository=None,
         requests_session=None,
     ):
         self.chat_history_service = chat_history_service
@@ -260,15 +286,24 @@ class SummaryService:
             if deepseek_timeout_seconds is None
             else deepseek_timeout_seconds
         )
+        self.deepseek_summary_usage_repository = (
+            deepseek_summary_usage_repository or DeepSeekSummaryUsageRepository()
+        )
         self.requests_session = requests_session or requests.Session()
         self._deepseek_config_warning_emitted = False
 
     async def summarize_recent(self, chat_id: int) -> str:
+        response = await self.summarize_recent_response(chat_id)
+        return response.text
+
+    async def summarize_recent_response(self, chat_id: int) -> SummaryResponse:
         messages = await self.chat_history_service.get_messages(chat_id)
         recent_messages = self.filter_recent_messages(messages, self.lookback_days)
         prepared_messages = self.prepare_messages(recent_messages)
         if not prepared_messages:
-            return SUMMARY_EMPTY_MESSAGE
+            return SummaryResponse(SUMMARY_EMPTY_MESSAGE)
+
+        latest_message_id = self.get_latest_message_id(messages)
 
         guardrail_result = self.check_prompt_injection(prepared_messages)
         if guardrail_result.filtered_messages:
@@ -280,9 +315,16 @@ class SummaryService:
         summary_messages = list(guardrail_result.safe_messages)
         if not summary_messages:
             logger.warning("No safe messages remained after summary input filtering.")
-            return SUMMARY_EMPTY_MESSAGE
+            return SummaryResponse(SUMMARY_EMPTY_MESSAGE)
 
         if self.should_use_deepseek():
+            limit_status = self.get_deepseek_limit_status(chat_id, messages)
+            if not limit_status.allowed:
+                return SummaryResponse(
+                    self.render_deepseek_limit_message(limit_status),
+                    include_prefix=False,
+                )
+
             if guardrail_result.should_fallback_to_local:
                 logger.warning(
                     "Potential prompt injection detected in DeepSeek summary input. Falling back to local."
@@ -290,15 +332,58 @@ class SummaryService:
             else:
                 deepseek_summary = await self.try_deepseek_summary(summary_messages)
                 if deepseek_summary:
-                    return deepseek_summary
+                    self.record_deepseek_summary_usage(chat_id, latest_message_id)
+                    return SummaryResponse(deepseek_summary)
 
-        return self.render_structured_summary(summary_messages)
+        return SummaryResponse(self.render_structured_summary(summary_messages))
 
     def should_use_deepseek(self) -> bool:
         return self.backend == "deepseek"
 
     def has_deepseek_config(self) -> bool:
         return bool(self.deepseek_api_key and self.deepseek_model and self.deepseek_base_url)
+
+    def get_deepseek_limit_status(
+        self,
+        chat_id: int,
+        messages: list[ChatMessageRecord],
+        now: datetime | None = None,
+    ) -> DeepSeekSummaryLimitStatus:
+        usage = self.deepseek_summary_usage_repository.get_usage(chat_id)
+        if usage is None:
+            return DeepSeekSummaryLimitStatus(allowed=True, minutes_left=0, messages_left=0)
+
+        current_time = now or datetime.now(timezone.utc)
+        last_summary_at = self.parse_created_at(usage.last_summary_created_at)
+        if last_summary_at is None:
+            return DeepSeekSummaryLimitStatus(allowed=True, minutes_left=0, messages_left=0)
+
+        elapsed = current_time - last_summary_at
+        remaining_interval = max(DEEPSEEK_MIN_SUMMARY_INTERVAL - elapsed, timedelta())
+        minutes_left = max(0, int((remaining_interval.total_seconds() + 59) // 60))
+
+        new_messages_count = self.count_new_messages_since_last_summary(messages, usage)
+        messages_left = max(0, DEEPSEEK_MIN_NEW_MESSAGES - new_messages_count)
+
+        return DeepSeekSummaryLimitStatus(
+            allowed=minutes_left == 0 and messages_left == 0,
+            minutes_left=minutes_left,
+            messages_left=messages_left,
+        )
+
+    def record_deepseek_summary_usage(self, chat_id: int, last_message_id: int | None) -> None:
+        self.deepseek_summary_usage_repository.save_usage(
+            chat_id=chat_id,
+            last_summary_created_at=datetime.now(timezone.utc).isoformat(),
+            last_summary_message_id=last_message_id,
+        )
+
+    @staticmethod
+    def render_deepseek_limit_message(limit_status: DeepSeekSummaryLimitStatus) -> str:
+        return DEEPSEEK_LIMIT_MESSAGE_TEMPLATE.format(
+            minutes_left=limit_status.minutes_left,
+            messages_left=limit_status.messages_left,
+        )
 
     @classmethod
     def score_prompt_injection_risk(cls, text: str) -> int:
@@ -457,6 +542,36 @@ class SummaryService:
         if parsed.tzinfo is None:
             return parsed.replace(tzinfo=timezone.utc)
         return parsed
+
+    @staticmethod
+    def get_latest_message_id(messages: list[ChatMessageRecord]) -> int | None:
+        for message in reversed(messages):
+            if message.message_id is not None:
+                return message.message_id
+        return None
+
+    @classmethod
+    def count_new_messages_since_last_summary(
+        cls,
+        messages: list[ChatMessageRecord],
+        usage: DeepSeekSummaryUsageRecord,
+    ) -> int:
+        last_summary_at = cls.parse_created_at(usage.last_summary_created_at)
+        if last_summary_at is None:
+            return len(messages)
+
+        new_messages_count = 0
+        for message in messages:
+            if usage.last_summary_message_id is not None and message.message_id is not None:
+                if message.message_id > usage.last_summary_message_id:
+                    new_messages_count += 1
+                continue
+
+            created_at = cls.parse_created_at(message.created_at)
+            if created_at is not None and created_at > last_summary_at:
+                new_messages_count += 1
+
+        return new_messages_count
 
     @classmethod
     def filter_recent_messages(

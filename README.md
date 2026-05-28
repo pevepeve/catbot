@@ -71,4 +71,6 @@ DEEPSEEK_TIMEOUT_SECONDS=30
 LOG_UNHANDLED_UPDATES=false
 ```
 
+If `SUMMARY_BACKEND=deepseek`, CatBot stores per-chat summary usage and allows a new DeepSeek `/tldr` only after both 30 minutes and 100 new chat messages since the last successful DeepSeek summary.
+
 If `SUMMARY_BACKEND=deepseek` but DeepSeek is not configured or the API request fails, CatBot automatically falls back to the local summarizer.

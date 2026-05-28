@@ -1,4 +1,5 @@
 from .anime_repository import AnimeRepository
+from .deepseek_summary_usage_repository import DeepSeekSummaryUsageRepository
 from .message_image_ocr_repository import MessageImageOCRRepository
 from .message_repository import MessageRepository
 from .neko_repository import NekoRepository

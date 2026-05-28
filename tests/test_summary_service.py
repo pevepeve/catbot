@@ -1,10 +1,12 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from models.orm import Base
+from repositories.deepseek_summary_usage_repository import DeepSeekSummaryUsageRecord
+from repositories.deepseek_summary_usage_repository import DeepSeekSummaryUsageRepository
 from repositories.message_repository import ChatMessageRecord, MessageRepository
 from services.summary_service import NOTABLE_TITLE, TOPICS_TITLE, SummaryService
 
@@ -48,6 +50,24 @@ class FakeDeepSeekSession:
 class FailingDeepSeekSession:
     def post(self, url, headers=None, json=None, timeout=None):
         raise RuntimeError("deepseek unavailable")
+
+
+class FakeDeepSeekSummaryUsageRepository:
+    def __init__(self, usage: DeepSeekSummaryUsageRecord | None = None):
+        self.usage = usage
+        self.saved = None
+
+    def get_usage(self, chat_id: int):
+        if self.usage is None or self.usage.chat_id != chat_id:
+            return None
+        return self.usage
+
+    def save_usage(self, chat_id: int, last_summary_created_at: str, last_summary_message_id: int | None):
+        self.saved = {
+            "chat_id": chat_id,
+            "last_summary_created_at": last_summary_created_at,
+            "last_summary_message_id": last_summary_message_id,
+        }
 
 
 def build_message(
@@ -118,6 +138,7 @@ def test_deepseek_summary_is_used_when_configured():
         deepseek_api_key="secret",
         deepseek_model="deepseek-chat",
         deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=FakeDeepSeekSummaryUsageRepository(),
         requests_session=session,
     )
 
@@ -137,6 +158,7 @@ def test_deepseek_missing_key_falls_back_to_local():
         FakeChatHistoryService(messages),
         backend="deepseek",
         deepseek_api_key="",
+        deepseek_summary_usage_repository=FakeDeepSeekSummaryUsageRepository(),
         requests_session=FakeDeepSeekSession("should not be used"),
     )
 
@@ -144,6 +166,101 @@ def test_deepseek_missing_key_falls_back_to_local():
 
     assert f"{TOPICS_TITLE}:" in summary
     assert f"{NOTABLE_TITLE}:" in summary
+
+
+def test_deepseek_summary_usage_is_saved_after_success():
+    messages = [
+        build_message(1, "alice", "Need release plan for deploy today?", "2026-05-28T10:00:00+03:00"),
+        build_message(2, "bob", "Yes, deploy after config fix", "2026-05-28T10:02:00+03:00"),
+    ]
+    session = FakeDeepSeekSession("Темы:\n- релиз\n\nВажное:\n- обсудили выкладку")
+    usage_repository = FakeDeepSeekSummaryUsageRepository()
+    service = SummaryService(
+        FakeChatHistoryService(messages),
+        backend="deepseek",
+        deepseek_api_key="secret",
+        deepseek_model="deepseek-chat",
+        deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=usage_repository,
+        requests_session=session,
+    )
+
+    summary = asyncio.run(service.summarize_recent(1))
+
+    assert summary == "Темы:\n- релиз\n\nВажное:\n- обсудили выкладку"
+    assert usage_repository.saved is not None
+    assert usage_repository.saved["chat_id"] == 1
+    assert usage_repository.saved["last_summary_message_id"] == 2
+
+
+def test_deepseek_summary_limit_blocks_requests_during_cooldown():
+    now = datetime.now(timezone.utc)
+    messages = [
+        build_message(1, "alice", "Need release plan for deploy today?", (now - timedelta(minutes=12)).isoformat()),
+        build_message(2, "bob", "Yes, deploy after config fix", (now - timedelta(minutes=11)).isoformat()),
+        build_message(3, "carol", "Ship it after tests", (now - timedelta(minutes=10)).isoformat()),
+    ]
+    session = FakeDeepSeekSession("should not be used")
+    usage_repository = FakeDeepSeekSummaryUsageRepository(
+        DeepSeekSummaryUsageRecord(
+            chat_id=1,
+            last_summary_created_at=(now - timedelta(minutes=10)).isoformat(),
+            last_summary_message_id=1,
+        )
+    )
+    service = SummaryService(
+        FakeChatHistoryService(messages),
+        backend="deepseek",
+        deepseek_api_key="secret",
+        deepseek_model="deepseek-chat",
+        deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=usage_repository,
+        requests_session=session,
+    )
+
+    response = asyncio.run(service.summarize_recent_response(1))
+
+    assert session.call_count == 0
+    assert response.include_prefix is False
+    assert "30 минут" in response.text
+    assert "20 мин" in response.text
+
+
+def test_deepseek_summary_limit_requires_100_new_messages():
+    now = datetime.now(timezone.utc)
+    messages = [
+        build_message(
+            message_id,
+            f"user{message_id}",
+            f"message {message_id} about deploy",
+            (now - timedelta(minutes=120 - message_id)).isoformat(),
+        )
+        for message_id in range(1, 100)
+    ]
+    session = FakeDeepSeekSession("should not be used")
+    usage_repository = FakeDeepSeekSummaryUsageRepository(
+        DeepSeekSummaryUsageRecord(
+            chat_id=1,
+            last_summary_created_at=(now - timedelta(minutes=40)).isoformat(),
+            last_summary_message_id=0,
+        )
+    )
+    service = SummaryService(
+        FakeChatHistoryService(messages),
+        backend="deepseek",
+        deepseek_api_key="secret",
+        deepseek_model="deepseek-chat",
+        deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=usage_repository,
+        requests_session=session,
+    )
+
+    response = asyncio.run(service.summarize_recent_response(1))
+
+    assert session.call_count == 0
+    assert response.include_prefix is False
+    assert "0 мин" in response.text
+    assert response.text.endswith("1.")
 
 
 def test_deepseek_failure_falls_back_to_local():
@@ -157,6 +274,7 @@ def test_deepseek_failure_falls_back_to_local():
         deepseek_api_key="secret",
         deepseek_model="deepseek-chat",
         deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=FakeDeepSeekSummaryUsageRepository(),
         requests_session=FailingDeepSeekSession(),
     )
 
@@ -179,6 +297,7 @@ def test_prompt_injection_filter_removes_suspicious_lines_before_deepseek():
         deepseek_api_key="secret",
         deepseek_model="deepseek-chat",
         deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=FakeDeepSeekSummaryUsageRepository(),
         requests_session=session,
     )
 
@@ -209,6 +328,7 @@ def test_prompt_injection_detection_falls_back_to_local_summary():
         deepseek_api_key="secret",
         deepseek_model="deepseek-chat",
         deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=FakeDeepSeekSummaryUsageRepository(),
         requests_session=session,
     )
 
@@ -247,6 +367,7 @@ def test_pliny_style_injection_falls_back_to_local_summary():
         deepseek_api_key="secret",
         deepseek_model="deepseek-chat",
         deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=FakeDeepSeekSummaryUsageRepository(),
         requests_session=session,
     )
 
@@ -408,3 +529,20 @@ def test_message_repository_keeps_last_messages_per_chat():
     assert [message.text for message in messages] == ["second", "third"]
     assert [message.chat_name for message in messages] == ["Chat One", "Chat One"]
     assert [message.chat_type for message in messages] == ["group", "group"]
+
+
+def test_deepseek_summary_usage_repository_persists_per_chat_state():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    repository = DeepSeekSummaryUsageRepository(session_factory=session_factory)
+
+    repository.save_usage(1, "2026-05-28T10:00:00+00:00", 42)
+    repository.save_usage(1, "2026-05-28T10:30:00+00:00", 77)
+
+    usage = repository.get_usage(1)
+
+    assert usage is not None
+    assert usage.chat_id == 1
+    assert usage.last_summary_created_at == "2026-05-28T10:30:00+00:00"
+    assert usage.last_summary_message_id == 77

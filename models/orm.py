@@ -61,6 +61,18 @@ class MessageImageOCR(Base):
     file_unique_id = Column(String(255))
 
 
+class DeepSeekSummaryUsage(Base):
+    __tablename__ = "DeepSeekSummaryUsage"
+    __table_args__ = (
+        UniqueConstraint("chat_id", name="uq_DeepSeekSummaryUsage_chat_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    chat_id = Column(Integer)
+    last_summary_created_at = Column(String(255))
+    last_summary_message_id = Column(Integer)
+
+
 # Backward-compatible aliases for existing imports.
 NekoIds = NekoImage
 AnimeThumbsIds = AnimeThumbnail
