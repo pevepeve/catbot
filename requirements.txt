@@ -4,8 +4,10 @@ joblib
 nltk
 numpy
 Pillow
+pymorphy3
 python-dotenv
 python-telegram-bot
+razdel
 requests
 SQLAlchemy
 sumy

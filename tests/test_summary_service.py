@@ -1,3 +1,5 @@
+import asyncio
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -6,52 +8,67 @@ from repositories.message_repository import ChatMessageRecord, MessageRepository
 from services.summary_service import SummaryService
 
 
-def test_prepare_messages_filters_noise_and_formats_speakers():
+class FakeChatHistoryService:
+    def __init__(self, messages):
+        self.messages = messages
+
+    async def get_messages(self, chat_id: int):
+        return self.messages
+
+
+def build_message(
+    message_id: int,
+    user_name: str,
+    text: str,
+    created_at: str,
+    reply_to_message_id: int | None = None,
+):
+    return ChatMessageRecord(
+        chat_id=1,
+        chat_name="Test Chat",
+        chat_username="testchat",
+        chat_type="group",
+        message_id=message_id,
+        user_id=message_id,
+        user_name=user_name,
+        reply_to_message_id=reply_to_message_id,
+        text=text,
+        created_at=created_at,
+        content_type="text",
+    )
+
+
+def test_prepare_messages_filters_noise_and_extracts_metadata():
     messages = [
-        ChatMessageRecord(
-            chat_id=1,
-            chat_name="Test Chat",
-            chat_username="testchat",
-            chat_type="group",
-            message_id=1,
-            user_id=1,
-            user_name="alice",
-            reply_to_message_id=None,
-            text="/animes",
-            created_at="2026-05-28T10:00:00+03:00",
-            content_type="text",
-        ),
-        ChatMessageRecord(
-            chat_id=1,
-            chat_name="Test Chat",
-            chat_username="testchat",
-            chat_type="group",
-            message_id=2,
-            user_id=2,
-            user_name="bob",
-            reply_to_message_id=None,
-            text="   обсудим   релиз  сегодня   ",
-            created_at="2026-05-28T10:05:00+03:00",
-            content_type="text",
-        ),
-        ChatMessageRecord(
-            chat_id=1,
-            chat_name="Test Chat",
-            chat_username="testchat",
-            chat_type="group",
-            message_id=3,
-            user_id=3,
-            user_name="carol",
-            reply_to_message_id=None,
-            text="...",
-            created_at="2026-05-28T10:06:00+03:00",
-            content_type="text",
-        ),
+        build_message(1, "alice", "/animes", "2026-05-28T10:00:00+03:00"),
+        build_message(2, "bob", "  release  tonight?  ", "2026-05-28T10:05:00+03:00"),
+        build_message(3, "carol", "...", "2026-05-28T10:06:00+03:00"),
     ]
 
     prepared = SummaryService.prepare_messages(messages)
 
-    assert prepared == ["[10:05] bob: обсудим релиз сегодня"]
+    assert len(prepared) == 1
+    assert prepared[0].speaker == "bob"
+    assert prepared[0].timestamp == "10:05"
+    assert prepared[0].normalized_text == "release tonight?"
+    assert prepared[0].is_question is True
+
+
+def test_structured_summary_includes_topics_questions_and_replies():
+    messages = [
+        build_message(1, "alice", "Need release plan for deploy today?", "2026-05-28T10:00:00+03:00"),
+        build_message(2, "bob", "Yes, deploy after config fix", "2026-05-28T10:02:00+03:00", reply_to_message_id=1),
+        build_message(3, "carol", "DeepSeek later, local summary now", "2026-05-28T10:03:00+03:00"),
+    ]
+    service = SummaryService(FakeChatHistoryService(messages))
+
+    summary = asyncio.run(service.summarize_recent(1))
+
+    assert "Темы:" in summary
+    assert "Важное:" in summary
+    assert "Вопросы:" in summary
+    assert "Ответы / треды:" in summary
+    assert "[10:02] bob -> alice: Yes, deploy after config fix" in summary
 
 
 def test_message_repository_keeps_last_messages_per_chat():
