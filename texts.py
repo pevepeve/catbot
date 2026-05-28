@@ -25,3 +25,12 @@ ADMIN_DOWNLOADED_ID = "Downloaded id: {file_info}"
 ADMIN_DOWNLOADED_MD5 = "Downloaded md5: {file_md5}"
 ADMIN_DEBUG = "Chat ID: {chat_id} UID :{user_id}"
 
+HELP_LINES.append("/factcheck - проверка утверждений в посте через DeepSeek")
+FACTCHECK_PREFIX = "Проверка утверждений:\n"
+FACTCHECK_USAGE = (
+    "Используйте /factcheck ответом на пост "
+    "или передайте текст утверждения после команды."
+)
+FACTCHECK_UNAVAILABLE = "DeepSeek для /factcheck не настроен."
+FACTCHECK_FAILED = "Не удалось выполнить /factcheck через DeepSeek."
+

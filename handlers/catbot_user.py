@@ -194,6 +194,21 @@ def get_media_source(message: Message):
     return None
 
 
+def extract_command_arguments(text: str | None) -> str:
+    if not text:
+        return ""
+    _, _, arguments = text.partition(" ")
+    return arguments.strip()
+
+
+def get_factcheck_claim_text(message: Message) -> str:
+    if message.reply_to_message:
+        replied_content = message.reply_to_message.text or message.reply_to_message.caption or ""
+        if replied_content.strip():
+            return replied_content.strip()
+    return extract_command_arguments(message.text)
+
+
 @router.callback_query(F.data.startswith("weekday_") | F.data.startswith("back_"))
 async def callbacks_weekday(callback_query: CallbackQuery):
     access = await ensure_callback_access(callback_query)
@@ -394,6 +409,30 @@ async def cmd_tldr(message: Message):
     summary_response = await summary_service.summarize_recent_response(message.chat.id)
     await message.answer(
         texts.TLDR_PREFIX + escape(summary_response.text),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.message(Command("factcheck"))
+async def cmd_factcheck(message: Message):
+    claim_text = get_factcheck_claim_text(message)
+    if not claim_text:
+        await message.answer(texts.FACTCHECK_USAGE)
+        return
+
+    try:
+        result = await summary_service.factcheck_claim(claim_text)
+    except RuntimeError as error:
+        error_message = str(error)
+        if "not configured" in error_message:
+            await message.answer(texts.FACTCHECK_UNAVAILABLE)
+            return
+        logger.exception("Fact check command failed for chat_id=%s", message.chat.id)
+        await message.answer(texts.FACTCHECK_FAILED)
+        return
+
+    await message.answer(
+        texts.FACTCHECK_PREFIX + escape(result),
         parse_mode=ParseMode.HTML,
     )
 

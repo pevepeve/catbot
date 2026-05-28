@@ -10,6 +10,8 @@ A Telegram bot with anime schedule, catgirl image, and chat summary features.
 - `/animetoday` - show today's anime schedule with inline details
 - `/animes` - browse the current anime schedule by weekday
 - `/tldr` - generate a short summary of recent chat messages
+- `/factcheck` - ask DeepSeek whether a post's claims could be called a lie and why
+  Use it by replying to a post or by passing the claim text after the command.
 
 ## Text Triggers
 

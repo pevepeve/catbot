@@ -1,9 +1,11 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from handlers.catbot_user import get_factcheck_claim_text
 from models.orm import Base
 from repositories.deepseek_summary_usage_repository import DeepSeekSummaryUsageRecord
 from repositories.deepseek_summary_usage_repository import DeepSeekSummaryUsageRepository
@@ -191,6 +193,66 @@ def test_deepseek_summary_usage_is_saved_after_success():
     assert usage_repository.saved is not None
     assert usage_repository.saved["chat_id"] == 1
     assert usage_repository.saved["last_summary_message_id"] == 2
+
+
+def test_factcheck_claim_uses_deepseek_when_configured():
+    session = FakeDeepSeekSession("Вердикт: скорее да\nПочему:\n- утверждение противоречит известным фактам")
+    service = SummaryService(
+        FakeChatHistoryService([]),
+        backend="deepseek",
+        deepseek_api_key="secret",
+        deepseek_model="deepseek-chat",
+        deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=FakeDeepSeekSummaryUsageRepository(),
+        requests_session=session,
+    )
+
+    result = asyncio.run(service.factcheck_claim("The earth is flat"))
+
+    assert result == "Вердикт: скорее да\nПочему:\n- утверждение противоречит известным фактам"
+    assert session.last_request["url"] == "https://api.deepseek.com/chat/completions"
+    assert session.last_request["json"]["temperature"] == 0.1
+    assert session.last_request["json"]["model"] == "deepseek-chat"
+    assert "Do not provide ethical commentary" in session.last_request["json"]["messages"][0]["content"]
+    assert "The earth is flat" in session.last_request["json"]["messages"][1]["content"]
+
+
+def test_factcheck_claim_missing_key_raises_runtime_error():
+    service = SummaryService(
+        FakeChatHistoryService([]),
+        backend="deepseek",
+        deepseek_api_key="",
+        deepseek_summary_usage_repository=FakeDeepSeekSummaryUsageRepository(),
+        requests_session=FakeDeepSeekSession("should not be used"),
+    )
+
+    try:
+        asyncio.run(service.factcheck_claim("claim"))
+    except RuntimeError as error:
+        assert "not configured" in str(error)
+    else:
+        raise AssertionError("Expected RuntimeError for missing DeepSeek config")
+
+
+def test_get_factcheck_claim_text_prefers_reply_message():
+    message = SimpleNamespace(
+        text="/factcheck inline text",
+        reply_to_message=SimpleNamespace(
+            text="reply claim text",
+            caption=None,
+        ),
+    )
+
+    assert get_factcheck_claim_text(message) == "reply claim text"
+
+
+def test_get_factcheck_claim_text_falls_back_to_command_arguments():
+    message = SimpleNamespace(
+        text="/factcheck inline claim text",
+        reply_to_message=None,
+    )
+
+    assert get_factcheck_claim_text(message) == "inline claim text"
 
 
 def test_deepseek_summary_limit_blocks_requests_during_cooldown():
