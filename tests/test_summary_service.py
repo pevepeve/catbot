@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from models.orm import Base
 from repositories.message_repository import ChatMessageRecord, MessageRepository
-from services.summary_service import SummaryService
+from services.summary_service import NOTABLE_TITLE, TOPICS_TITLE, SummaryService
 
 
 class FakeChatHistoryService:
@@ -65,27 +65,62 @@ def test_structured_summary_keeps_only_topics_and_notable():
 
     summary = asyncio.run(service.summarize_recent(1))
 
-    assert "Темы:" in summary
-    assert "Важное:" in summary
-    assert "Вопросы:" not in summary
-    assert "Ответы / треды:" not in summary
-    assert "Открыто:" not in summary
+    assert f"{TOPICS_TITLE}:" in summary
+    assert f"{NOTABLE_TITLE}:" in summary
+    assert "\u0412\u043e\u043f\u0440\u043e\u0441\u044b:" not in summary
+    assert "\u041e\u0442\u0432\u0435\u0442\u044b / \u0442\u0440\u0435\u0434\u044b:" not in summary
+    assert "\u041e\u0442\u043a\u0440\u044b\u0442\u043e:" not in summary
     assert "[10:02] bob: Yes, deploy after config fix" in summary
 
 
-def test_topic_extraction_skips_generic_words():
+def test_topic_extraction_uses_external_stopwords():
     messages = [
-        build_message(1, "alice", "Это такой криптодоллар, почти как стейблкоин", "2026-05-28T10:00:00+03:00"),
-        build_message(2, "bob", "Криптодоллар и крипта снова обсуждаются", "2026-05-28T10:02:00+03:00"),
-        build_message(3, "carol", "Такой подход к крипте спорный", "2026-05-28T10:03:00+03:00"),
+        build_message(
+            1,
+            "alice",
+            "\u042d\u0442\u043e \u0442\u0430\u043a\u043e\u0439 "
+            "\u043a\u0440\u0438\u043f\u0442\u043e\u0434\u043e\u043b\u043b\u0430\u0440, "
+            "\u043f\u043e\u0447\u0442\u0438 \u043a\u0430\u043a "
+            "\u0441\u0442\u0435\u0439\u0431\u043b\u043a\u043e\u0438\u043d",
+            "2026-05-28T10:00:00+03:00",
+        ),
+        build_message(
+            2,
+            "bob",
+            "\u041a\u0440\u0438\u043f\u0442\u043e\u0434\u043e\u043b\u043b\u0430\u0440 "
+            "\u0438 \u043a\u0440\u0438\u043f\u0442\u0430 \u0441\u043d\u043e\u0432\u0430 "
+            "\u043e\u0431\u0441\u0443\u0436\u0434\u0430\u044e\u0442\u0441\u044f",
+            "2026-05-28T10:02:00+03:00",
+        ),
+        build_message(
+            3,
+            "carol",
+            "\u0422\u0430\u043a\u043e\u0439 \u043f\u043e\u0434\u0445\u043e\u0434 "
+            "\u043a \u043a\u0440\u0438\u043f\u0442\u0435 \u0441\u043f\u043e\u0440\u043d\u044b\u0439",
+            "2026-05-28T10:03:00+03:00",
+        ),
     ]
 
     prepared = SummaryService.prepare_messages(messages)
     topics = SummaryService.extract_topics(prepared)
 
-    assert "такой" not in topics
-    assert "быть" not in topics
-    assert "криптодоллар" in topics
+    assert "\u0442\u0430\u043a\u043e\u0439" not in topics
+    assert "\u0431\u044b\u0442\u044c" not in topics
+    assert "\u043a\u0440\u0438\u043f\u0442\u043e\u0434\u043e\u043b\u043b\u0430\u0440" in topics
+
+
+def test_extract_notable_points_skips_near_duplicates():
+    messages = [
+        build_message(1, "alice", "Need release plan for deploy tonight", "2026-05-28T10:00:00+03:00"),
+        build_message(2, "bob", "Need release plan for deploy tonight ASAP", "2026-05-28T10:01:00+03:00"),
+        build_message(3, "carol", "Config fix is ready for production", "2026-05-28T10:02:00+03:00"),
+    ]
+
+    prepared = SummaryService.prepare_messages(messages)
+    notable_points = SummaryService.extract_notable_points(prepared)
+
+    assert len(notable_points) == 2
+    assert any("Config fix is ready for production" in point for point in notable_points)
 
 
 def test_filter_recent_messages_excludes_stale_history():

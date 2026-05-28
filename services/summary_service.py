@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from pathlib import Path
 from typing import Iterable
 
 from config import get_settings
@@ -23,105 +25,54 @@ except ImportError:  # pragma: no cover - optional dependency in local dev
 NOISE_MESSAGE_MIN_LEN = 2
 MAX_TOPICS = 5
 MAX_NOTABLE_POINTS = 4
+TOPIC_SCORE_MIN = 3
+NOTABLE_SCORE_MIN = 3
+SIMILARITY_THRESHOLD = 0.65
 QUESTION_WORDS = {
-    "как",
-    "когда",
-    "кто",
-    "куда",
-    "где",
-    "зачем",
-    "почему",
-    "что",
-    "чего",
-    "какой",
-    "какая",
-    "какие",
-    "какого",
-    "нужно",
-    "надо",
-}
-STOPWORDS = {
-    "это",
-    "как",
-    "так",
-    "для",
-    "что",
-    "или",
-    "если",
-    "она",
-    "они",
-    "оно",
-    "его",
-    "ее",
-    "её",
-    "мне",
-    "тебе",
-    "вам",
-    "нас",
-    "все",
-    "всё",
-    "тут",
-    "там",
-    "потом",
-    "сейчас",
-    "сегодня",
-    "завтра",
-    "вчера",
-    "после",
-    "надо",
-    "нужно",
-    "будет",
-    "будут",
-    "такой",
-    "такое",
-    "такая",
-    "такие",
-    "быть",
-    "есть",
-    "весь",
-    "вся",
-    "сам",
-    "сама",
-    "свой",
-    "свои",
-    "этот",
-    "эта",
-    "эти",
-    "тот",
-    "можно",
-    "мочь",
-    "стать",
-    "делать",
-    "сделать",
-    "сказать",
-    "говорить",
-    "идти",
-    "пойти",
-    "хотеть",
-    "знать",
-    "думать",
-    "видеть",
-    "просто",
-    "типа",
-    "блин",
-    "лол",
-    "ага",
-    "угу",
-    "щас",
-    "ещё",
-    "еще",
-    "очень",
-    "вроде",
-    "короче",
-    "кстати",
-    "только",
-    "чтобы",
-    "пока",
-    "потому",
+    "\u043a\u0430\u043a",
+    "\u043a\u043e\u0433\u0434\u0430",
+    "\u043a\u0442\u043e",
+    "\u043a\u0443\u0434\u0430",
+    "\u0433\u0434\u0435",
+    "\u0437\u0430\u0447\u0435\u043c",
+    "\u043f\u043e\u0447\u0435\u043c\u0443",
+    "\u0447\u0442\u043e",
+    "\u0447\u0435\u0433\u043e",
+    "\u043a\u0430\u043a\u043e\u0439",
+    "\u043a\u0430\u043a\u0430\u044f",
+    "\u043a\u0430\u043a\u0438\u0435",
+    "\u043a\u0430\u043a\u043e\u0433\u043e",
+    "\u043d\u0443\u0436\u043d\u043e",
+    "\u043d\u0430\u0434\u043e",
 }
 LINK_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
-TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9_-]+")
-CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
+TOKEN_RE = re.compile(r"[A-Za-z\u0400-\u04FF0-9_-]+")
+CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+SUMMARY_EMPTY_MESSAGE = (
+    "\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e "
+    "\u0434\u0430\u043d\u043d\u044b\u0445 \u0434\u043b\u044f "
+    "\u0441\u0443\u043c\u043c\u0430\u0440\u0438\u0437\u0430\u0446\u0438\u0438."
+)
+TOPICS_TITLE = "\u0422\u0435\u043c\u044b"
+NOTABLE_TITLE = "\u0412\u0430\u0436\u043d\u043e\u0435"
+
+
+@lru_cache(maxsize=1)
+def load_stopwords() -> frozenset[str]:
+    stopwords_path = Path(__file__).with_name("summary_stopwords.txt")
+    if not stopwords_path.exists():
+        return frozenset()
+
+    words = set()
+    for raw_line in stopwords_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip().lower()
+        if not line or line.startswith("#"):
+            continue
+        words.add(line)
+    return frozenset(words)
+
+
+STOPWORDS = load_stopwords()
 
 
 def build_morph_analyzer():
@@ -162,7 +113,7 @@ class SummaryService:
         recent_messages = self.filter_recent_messages(messages, self.lookback_days)
         prepared_messages = self.prepare_messages(recent_messages)
         if not prepared_messages:
-            return "Недостаточно данных для суммаризации."
+            return SUMMARY_EMPTY_MESSAGE
         return self.render_structured_summary(prepared_messages)
 
     @staticmethod
@@ -232,7 +183,7 @@ class SummaryService:
             return False
         if token.startswith(("http", "www", "@", "#", "/")):
             return False
-        return bool(re.search(r"[A-Za-zА-Яа-яЁё0-9]", token))
+        return bool(re.search(r"[A-Za-z\u0400-\u04FF0-9]", token))
 
     @classmethod
     def is_topic_token(cls, token: str) -> bool:
@@ -284,11 +235,13 @@ class SummaryService:
         cls,
         normalized_text: str,
         lemmas: tuple[str, ...],
+        topic_lemmas: tuple[str, ...],
         is_question: bool,
         is_reply: bool,
         has_link: bool,
     ) -> int:
         score = min(len(set(lemmas)), 6)
+        score += min(len(set(topic_lemmas)), 3)
         if 25 <= len(normalized_text) <= 300:
             score += 2
         if is_question:
@@ -320,6 +273,7 @@ class SummaryService:
             score = cls.score_message(
                 normalized_text,
                 lemmas,
+                topic_lemmas,
                 is_question,
                 is_reply,
                 has_link,
@@ -346,28 +300,72 @@ class SummaryService:
     def format_transcript_line(message: PreparedSummaryMessage) -> str:
         return f"[{message.timestamp}] {message.speaker}: {message.normalized_text}"
 
+    @staticmethod
+    def similarity_ratio(first_tokens: tuple[str, ...], second_tokens: tuple[str, ...]) -> float:
+        first_set = set(first_tokens)
+        second_set = set(second_tokens)
+        if not first_set or not second_set:
+            return 0.0
+        intersection = len(first_set & second_set)
+        union = len(first_set | second_set)
+        if union == 0:
+            return 0.0
+        return intersection / union
+
+    @classmethod
+    def messages_are_similar(
+        cls,
+        first_message: PreparedSummaryMessage,
+        second_message: PreparedSummaryMessage,
+    ) -> bool:
+        if first_message.normalized_text == second_message.normalized_text:
+            return True
+        if (
+            first_message.normalized_text in second_message.normalized_text
+            or second_message.normalized_text in first_message.normalized_text
+        ):
+            return True
+
+        first_tokens = first_message.topic_lemmas or first_message.lemmas
+        second_tokens = second_message.topic_lemmas or second_message.lemmas
+        return cls.similarity_ratio(first_tokens, second_tokens) >= SIMILARITY_THRESHOLD
+
     @classmethod
     def extract_topics(cls, messages: list[PreparedSummaryMessage]) -> list[str]:
-        topic_scores: dict[str, int] = {}
+        topic_weights: dict[str, int] = {}
         topic_message_counts: dict[str, int] = {}
-        for message in messages:
-            if message.score < 3:
-                continue
-            for lemma in set(message.topic_lemmas):
-                topic_scores[lemma] = topic_scores.get(lemma, 0) + 1
-                topic_message_counts[lemma] = topic_message_counts.get(lemma, 0) + 1
+        topic_speakers: dict[str, set[str]] = {}
 
-        filtered_topics = {
-            topic: score
-            for topic, score in topic_scores.items()
+        for message in messages:
+            if message.score < TOPIC_SCORE_MIN:
+                continue
+
+            unique_topics = set(message.topic_lemmas)
+            if not unique_topics:
+                continue
+
+            weight = max(message.score, 1)
+            for lemma in unique_topics:
+                topic_weights[lemma] = topic_weights.get(lemma, 0) + weight
+                topic_message_counts[lemma] = topic_message_counts.get(lemma, 0) + 1
+                topic_speakers.setdefault(lemma, set()).add(message.speaker)
+
+        repeated_topics = {
+            topic: weight
+            for topic, weight in topic_weights.items()
             if topic_message_counts.get(topic, 0) >= 2
         }
-        if not filtered_topics:
-            filtered_topics = topic_scores
+        selected_topics = repeated_topics or topic_weights
 
         ranked_topics = sorted(
-            filtered_topics.items(),
-            key=lambda item: (-item[1], -len(item[0]), item[0]),
+            selected_topics.items(),
+            key=lambda item: (
+                -len(topic_speakers.get(item[0], set())),
+                -topic_message_counts.get(item[0], 0),
+                -item[1],
+                -len(item[0]),
+                item[0],
+            ),
         )
         return [topic for topic, _ in ranked_topics[:MAX_TOPICS]]
 
@@ -375,14 +373,36 @@ class SummaryService:
     def extract_notable_points(cls, messages: list[PreparedSummaryMessage]) -> list[str]:
         ranked_messages = sorted(
             messages,
-            key=lambda message: (-message.score, message.timestamp, message.speaker),
+            key=lambda message: (
+                -message.score,
+                -len(set(message.topic_lemmas or message.lemmas)),
+                -len(message.normalized_text),
+                message.timestamp,
+                message.speaker,
+            ),
         )
+        notable_messages: list[PreparedSummaryMessage] = []
         notable_points = []
-        seen_texts = set()
+
         for message in ranked_messages:
-            if message.normalized_text in seen_texts:
+            if message.score < NOTABLE_SCORE_MIN:
                 continue
-            seen_texts.add(message.normalized_text)
+            if any(cls.messages_are_similar(existing, message) for existing in notable_messages):
+                continue
+
+            notable_messages.append(message)
+            notable_points.append(cls.format_transcript_line(message))
+            if len(notable_points) >= MAX_NOTABLE_POINTS:
+                break
+
+        if notable_points:
+            return notable_points
+
+        fallback_messages = sorted(messages, key=lambda message: (message.timestamp, message.speaker))
+        for message in fallback_messages:
+            if any(cls.messages_are_similar(existing, message) for existing in notable_messages):
+                continue
+            notable_messages.append(message)
             notable_points.append(cls.format_transcript_line(message))
             if len(notable_points) >= MAX_NOTABLE_POINTS:
                 break
@@ -399,10 +419,10 @@ class SummaryService:
 
         sections = []
         if topics:
-            sections.append(cls.render_section("Темы", topics))
+            sections.append(cls.render_section(TOPICS_TITLE, topics))
         if notable_points:
-            sections.append(cls.render_section("Важное", notable_points))
+            sections.append(cls.render_section(NOTABLE_TITLE, notable_points))
 
         if not sections:
-            return "Недостаточно данных для суммаризации."
+            return SUMMARY_EMPTY_MESSAGE
         return "\n\n".join(sections)
