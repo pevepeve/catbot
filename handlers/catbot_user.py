@@ -9,7 +9,6 @@ from repositories import AnimeRepository, MessageRepository, NekoRepository
 from services import (
     AnimeService,
     ChatHistoryService,
-    LinkService,
     NekoService,
     SummaryService,
 )
@@ -22,7 +21,6 @@ router = Router()
 anime_service = AnimeService(AnimeRepository())
 chat_history_service = ChatHistoryService(MessageRepository())
 summary_service = SummaryService(chat_history_service)
-link_service = LinkService()
 neko_service = NekoService(NekoRepository())
 
 
@@ -155,14 +153,6 @@ async def cmd_tldr(message: Message):
 @router.message(F.text.regexp(r"(^кек$)"))
 async def kek(message: Message):
     await message.answer(texts.KEK)
-
-
-@router.message(F.text.regexp(r"https:\/\/twitter\.com\/\b"))
-async def twitter_nitter(message: Message):
-    await chat_history_service.save_message(message.text, message.date, message.chat.id)
-    nittered = link_service.rewrite_twitter_link(message.text)
-    if nittered:
-        await message.answer(nittered)
 
 
 @router.message(F.text)
