@@ -14,11 +14,22 @@ def chunk_buttons(buttons, row_width):
     return [buttons[index:index + row_width] for index in range(0, len(buttons), row_width)]
 
 
-def get_keyboard_days(days_list: list[str], days_list_ru: list[str], day: Optional[str] = None):
+def with_owner(callback_data: str, owner_id: Optional[int] = None) -> str:
+    if owner_id is None:
+        return callback_data
+    return f"{callback_data}_{owner_id}"
+
+
+def get_keyboard_days(
+    days_list: list[str],
+    days_list_ru: list[str],
+    day: Optional[str] = None,
+    owner_id: Optional[int] = None,
+):
     buttons = [
         InlineKeyboardButton(
             text=days_list_ru[day_num],
-            callback_data="weekday_" + day_name,
+            callback_data=with_owner("weekday_" + day_name, owner_id),
         )
         for day_num, day_name in enumerate(days_list)
     ]
@@ -26,36 +37,36 @@ def get_keyboard_days(days_list: list[str], days_list_ru: list[str], day: Option
         buttons.append(
             InlineKeyboardButton(
                 text=texts.MORE_DETAILS,
-                callback_data=f"animedayc_{day}",
+                callback_data=with_owner(f"animedayc_{day}", owner_id),
             )
         )
     return InlineKeyboardMarkup(inline_keyboard=chunk_buttons(buttons, ROW_LEN_WEEK_BUTTONS))
 
 
-def get_keyboard_animes(titles_day: list[dict], day: str):
+def get_keyboard_animes(titles_day: list[dict], day: str, owner_id: Optional[int] = None):
     buttons = [
         InlineKeyboardButton(
             text=f'{title_num} {title["title"][:LETTERS_IN_TITLE_BTN]}..',
-            callback_data="anime_" + day + "_" + str(title_num),
+            callback_data=with_owner("anime_" + day + "_" + str(title_num), owner_id),
         )
         for title_num, title in enumerate(titles_day)
     ]
     buttons.append(
         InlineKeyboardButton(
             text=texts.BACK,
-            callback_data=f"back_{day}",
+            callback_data=with_owner(f"back_{day}", owner_id),
         )
     )
     return InlineKeyboardMarkup(inline_keyboard=chunk_buttons(buttons, ROW_LEN_TITLES_BUTTONS))
 
 
-def get_keyboard_back(weekday: str):
+def get_keyboard_back(weekday: str, owner_id: Optional[int] = None):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text=texts.BACK,
-                    callback_data="back_" + weekday,
+                    callback_data=with_owner("back_" + weekday, owner_id),
                 )
             ]
         ]

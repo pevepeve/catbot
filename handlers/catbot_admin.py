@@ -26,7 +26,8 @@ def build_admin_router(admin_id: int) -> Router:
     @router.message(Command("update_anime"))
     async def cmd_anime_update(message: Message):
         try:
-            anime_service.refresh_schedule()
+            media_store = TelegramMediaStore(message.bot, settings.admin_id)
+            await anime_service.refresh_schedule(media_store, force=True)
         except Exception as error:
             logger.error(error)
         else:
