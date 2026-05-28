@@ -221,9 +221,11 @@ def test_deepseek_summary_limit_blocks_requests_during_cooldown():
     response = asyncio.run(service.summarize_recent_response(1))
 
     assert session.call_count == 0
-    assert response.include_prefix is False
-    assert "30 минут" in response.text
-    assert "20 мин" in response.text
+    assert response.include_prefix is True
+    assert f"{TOPICS_TITLE}:" in response.text
+    assert f"{NOTABLE_TITLE}:" in response.text
+    assert "Need release plan for deploy today?" in response.text
+    assert "Yes, deploy after config fix" in response.text
 
 
 def test_deepseek_summary_limit_requires_100_new_messages():
@@ -258,9 +260,10 @@ def test_deepseek_summary_limit_requires_100_new_messages():
     response = asyncio.run(service.summarize_recent_response(1))
 
     assert session.call_count == 0
-    assert response.include_prefix is False
-    assert "0 мин" in response.text
-    assert response.text.endswith("1.")
+    assert response.include_prefix is True
+    assert f"{TOPICS_TITLE}:" in response.text
+    assert f"{NOTABLE_TITLE}:" in response.text
+    assert "message 10 about deploy" in response.text
 
 
 def test_deepseek_failure_falls_back_to_local():

@@ -179,12 +179,6 @@ PROMPT_INJECTION_PATTERNS = (
 SUMMARY_EMPTY_MESSAGE = "Недостаточно данных для суммаризации."
 TOPICS_TITLE = "Темы"
 NOTABLE_TITLE = "Важное"
-DEEPSEEK_LIMIT_MESSAGE_TEMPLATE = (
-    "Сводка DeepSeek для этого чата доступна не чаще одного раза в 30 минут "
-    "и только после 100 новых сообщений.\n"
-    "Сейчас осталось подождать: {minutes_left} мин.\n"
-    "Новых сообщений не хватает: {messages_left}."
-)
 
 logger = logging.getLogger(__name__)
 
@@ -320,12 +314,13 @@ class SummaryService:
         if self.should_use_deepseek():
             limit_status = self.get_deepseek_limit_status(chat_id, messages)
             if not limit_status.allowed:
-                return SummaryResponse(
-                    self.render_deepseek_limit_message(limit_status),
-                    include_prefix=False,
+                logger.info(
+                    "DeepSeek summary limit reached for chat_id=%s. Falling back to local. minutes_left=%s messages_left=%s",
+                    chat_id,
+                    limit_status.minutes_left,
+                    limit_status.messages_left,
                 )
-
-            if guardrail_result.should_fallback_to_local:
+            elif guardrail_result.should_fallback_to_local:
                 logger.warning(
                     "Potential prompt injection detected in DeepSeek summary input. Falling back to local."
                 )
@@ -376,13 +371,6 @@ class SummaryService:
             chat_id=chat_id,
             last_summary_created_at=datetime.now(timezone.utc).isoformat(),
             last_summary_message_id=last_message_id,
-        )
-
-    @staticmethod
-    def render_deepseek_limit_message(limit_status: DeepSeekSummaryLimitStatus) -> str:
-        return DEEPSEEK_LIMIT_MESSAGE_TEMPLATE.format(
-            minutes_left=limit_status.minutes_left,
-            messages_left=limit_status.messages_left,
         )
 
     @classmethod
