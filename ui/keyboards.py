@@ -71,3 +71,16 @@ def get_keyboard_back(weekday: str, owner_id: Optional[int] = None):
             ]
         ]
     )
+
+
+def get_keyboard_close_detail(menu_message_id: int, owner_id: int):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=texts.BACK,
+                    callback_data=f"photoback_{menu_message_id}_{owner_id}",
+                )
+            ]
+        ]
+    )

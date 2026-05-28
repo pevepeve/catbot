@@ -1,2 +1,7 @@
-from .keyboards import get_keyboard_animes, get_keyboard_back, get_keyboard_days
+from .keyboards import (
+    get_keyboard_animes,
+    get_keyboard_back,
+    get_keyboard_close_detail,
+    get_keyboard_days,
+)
 

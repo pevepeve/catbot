@@ -4,8 +4,16 @@ from aiogram import Dispatcher, F, Router
 from aiogram.enums import ChatMemberStatus, ChatType, ParseMode
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    Message,
+)
 from emoji import emojize
+from sqlalchemy.exc import NoResultFound
 
 import texts
 from repositories import AnimeRepository, MessageRepository, NekoRepository
@@ -15,13 +23,15 @@ from services import (
     NekoService,
     SummaryService,
 )
-from ui import get_keyboard_animes, get_keyboard_back, get_keyboard_days
+from ui import get_keyboard_animes, get_keyboard_close_detail, get_keyboard_days
 
 
 MAX_LEN_MESSAGE = 4096
+MAX_LEN_CAPTION = 1024
 CALLBACK_EXPIRED_TEXT = "This menu has expired. Run the command again."
 CALLBACK_FOREIGN_TEXT = "Only the user who opened this menu can use these buttons."
 CALLBACK_MUTED_TEXT = "Muted users cannot use this menu in the chat."
+anime_detail_messages: dict[tuple[int, int], int] = {}
 
 router = Router()
 anime_service = AnimeService(AnimeRepository())
@@ -63,7 +73,7 @@ def build_anime_message(weekday: str, title_index: int) -> str:
 
     if synopsis:
         synopsis_block = f"{synopsis}\n\n"
-        available_synopsis_len = MAX_LEN_MESSAGE - len(header) - len(link_line)
+        available_synopsis_len = MAX_LEN_CAPTION - len(header) - len(link_line)
         if available_synopsis_len < len(synopsis_block):
             synopsis_block = synopsis_block[: max(available_synopsis_len - 3, 0)] + "..."
         return header + synopsis_block + link_line
@@ -116,6 +126,47 @@ async def safe_edit_text(message: Message, text: str, **kwargs) -> None:
             raise
 
 
+async def safe_delete_message(bot, chat_id: int, message_id: int) -> None:
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except TelegramBadRequest:
+        return
+
+
+async def close_detail_message(chat_id: int, menu_message_id: int, bot) -> None:
+    detail_message_id = anime_detail_messages.pop((chat_id, menu_message_id), None)
+    if detail_message_id is not None:
+        await safe_delete_message(bot, chat_id, detail_message_id)
+
+
+def split_photo_back_payload(callback_data: str) -> tuple[int, int] | None:
+    payload, owner_id = split_callback_owner(callback_data)
+    if owner_id is None or not payload.startswith("photoback_"):
+        return None
+    menu_message_id = payload.split("_")[1]
+    if not menu_message_id.isdigit():
+        return None
+    return int(menu_message_id), owner_id
+
+
+def build_thumbnail_input(anime_title: dict):
+    image_filename = anime_title["image"]
+    try:
+        return anime_service.get_thumbnail_id(image_filename)
+    except NoResultFound:
+        image_path = anime_service.client.media_folder / image_filename
+        return FSInputFile(image_path, filename=image_filename)
+
+
+async def persist_uploaded_thumbnail(anime_title: dict, message: Message) -> None:
+    if not message.photo:
+        return
+    anime_service.repository.save_thumbnail_id(
+        message.photo[-1].file_id,
+        anime_title["image"],
+    )
+
+
 @router.callback_query(F.data.startswith("weekday_") | F.data.startswith("back_"))
 async def callbacks_weekday(callback_query: CallbackQuery):
     access = await ensure_callback_access(callback_query)
@@ -125,6 +176,11 @@ async def callbacks_weekday(callback_query: CallbackQuery):
     payload, owner_id = access
     weekday_q = payload.split("_")[1]
     message_text = build_weekday_message(weekday_q)
+    await close_detail_message(
+        callback_query.message.chat.id,
+        callback_query.message.message_id,
+        callback_query.bot,
+    )
 
     if callback_query.message:
         await safe_edit_text(
@@ -149,14 +205,46 @@ async def callbacks_anime(callback_query: CallbackQuery):
 
     payload, owner_id = access
     _, weekday_q, title_q = payload.split("_")
-    message_text = build_anime_message(weekday_q, int(title_q))
-
-    await safe_edit_text(
-        callback_query.message,
-        message_text,
+    anime_title = anime_service.get_anime_details(weekday_q, int(title_q))
+    caption = build_anime_message(weekday_q, int(title_q))
+    media = InputMediaPhoto(
+        media=build_thumbnail_input(anime_title),
+        caption=caption,
         parse_mode=ParseMode.HTML,
-        reply_markup=get_keyboard_back(weekday_q, owner_id=owner_id),
     )
+    detail_key = (callback_query.message.chat.id, callback_query.message.message_id)
+    detail_message_id = anime_detail_messages.get(detail_key)
+    reply_markup = get_keyboard_close_detail(
+        callback_query.message.message_id,
+        owner_id,
+    )
+
+    if detail_message_id is not None:
+        try:
+            updated_message = await callback_query.bot.edit_message_media(
+                chat_id=callback_query.message.chat.id,
+                message_id=detail_message_id,
+                media=media,
+                reply_markup=reply_markup,
+            )
+            if isinstance(updated_message, Message):
+                await persist_uploaded_thumbnail(anime_title, updated_message)
+        except TelegramBadRequest as error:
+            if "message is not modified" in str(error):
+                await callback_query.answer(emojize(":check_mark_button:"))
+                return
+            detail_message_id = None
+
+    if detail_message_id is None:
+        detail_message = await callback_query.message.reply_photo(
+            photo=build_thumbnail_input(anime_title),
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+        )
+        anime_detail_messages[detail_key] = detail_message.message_id
+        await persist_uploaded_thumbnail(anime_title, detail_message)
+
     await callback_query.answer(emojize(":check_mark_button:"))
 
 
@@ -169,11 +257,44 @@ async def callbacks_animechoice(callback_query: CallbackQuery):
     payload, owner_id = access
     weekday_q = payload.split("_")[1]
     today_anime = anime_service.get_schedule_for_weekday(weekday_q)
+    await close_detail_message(
+        callback_query.message.chat.id,
+        callback_query.message.message_id,
+        callback_query.bot,
+    )
     await safe_edit_text(
         callback_query.message,
         texts.ANIME_PICK_TITLE,
         reply_markup=get_keyboard_animes(today_anime, weekday_q, owner_id=owner_id),
         parse_mode=ParseMode.MARKDOWN_V2,
+    )
+    await callback_query.answer(emojize(":check_mark_button:"))
+
+
+@router.callback_query(F.data.startswith("photoback_"))
+async def callbacks_photo_back(callback_query: CallbackQuery):
+    if not callback_query.data or not callback_query.message:
+        await callback_query.answer(CALLBACK_EXPIRED_TEXT, show_alert=True)
+        return
+
+    parsed = split_photo_back_payload(callback_query.data)
+    if parsed is None:
+        await callback_query.answer(CALLBACK_EXPIRED_TEXT, show_alert=True)
+        return
+
+    menu_message_id, owner_id = parsed
+    if owner_id != callback_query.from_user.id:
+        await callback_query.answer(CALLBACK_FOREIGN_TEXT, show_alert=True)
+        return
+    if not await can_use_chat_menu(callback_query):
+        await callback_query.answer(CALLBACK_MUTED_TEXT, show_alert=True)
+        return
+
+    anime_detail_messages.pop((callback_query.message.chat.id, menu_message_id), None)
+    await safe_delete_message(
+        callback_query.bot,
+        callback_query.message.chat.id,
+        callback_query.message.message_id,
     )
     await callback_query.answer(emojize(":check_mark_button:"))
 
