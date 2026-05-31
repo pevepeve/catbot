@@ -1,0 +1,15 @@
+[Unit]
+Description=CatBot Telegram bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/catbot
+ExecStart=/opt/catbot/.venv/bin/python /opt/catbot/bot.py
+Restart=always
+RestartSec=5
+User=catbot
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

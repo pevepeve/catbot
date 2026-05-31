@@ -76,3 +76,80 @@ LOG_UNHANDLED_UPDATES=false
 If `SUMMARY_BACKEND=deepseek`, CatBot stores per-chat summary usage and allows a new DeepSeek `/tldr` only after both 30 minutes and 100 new chat messages since the last successful DeepSeek summary. Until then, `/tldr` automatically falls back to the local summarizer for that chat.
 
 If `SUMMARY_BACKEND=deepseek` but DeepSeek is not configured or the API request fails, CatBot automatically falls back to the local summarizer.
+
+## Deploy On Another Windows Machine
+
+1. Copy the `catbot` folder to the target machine.
+2. Open PowerShell in that folder.
+3. Run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\deploy_windows.ps1
+```
+
+The script will:
+
+- create `.venv`
+- install dependencies from `requirements.txt`
+- create the `media` folder
+- copy `.env.example` to `.env` if `.env` does not exist
+
+Then:
+
+1. Edit `.env` and fill in `API_TOKEN`, `ADMIN_ID`, and `DB_FILENAME`.
+2. Start the bot with:
+
+```powershell
+.\run_bot.ps1
+```
+
+You can also start immediately after setup with:
+
+```powershell
+.\deploy_windows.ps1 -StartBot
+```
+
+## Deploy On Ubuntu 18.04.5 LTS
+
+Ubuntu 18.04 ships with Python 3.6, which is too old for this project. The deploy script installs Python 3.11 from `ppa:deadsnakes/ppa`, creates `.venv`, installs dependencies, creates `media`, and copies `.env.example` to `.env` if needed.
+
+1. Copy the `catbot` folder to the target machine.
+2. Open a terminal in that folder.
+3. Make the scripts executable:
+
+```bash
+chmod +x deploy_ubuntu_1804.sh run_bot.sh
+```
+
+4. Run:
+
+```bash
+./deploy_ubuntu_1804.sh
+```
+
+Then:
+
+1. Edit `.env` and fill in `API_TOKEN`, `ADMIN_ID`, and `DB_FILENAME`.
+2. Start the bot with:
+
+```bash
+./run_bot.sh
+```
+
+You can also start immediately after setup with:
+
+```bash
+./deploy_ubuntu_1804.sh --start-bot
+```
+
+Optional `systemd` setup:
+
+1. Copy `catbot.service.example` to `/etc/systemd/system/catbot.service`.
+2. Adjust `WorkingDirectory`, `ExecStart`, and `User`.
+3. Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now catbot
+```
