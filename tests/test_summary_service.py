@@ -195,6 +195,38 @@ def test_deepseek_summary_usage_is_saved_after_success():
     assert usage_repository.saved["last_summary_message_id"] == 2
 
 
+def test_deepseek_summary_anonymizes_speakers_in_prompt_and_restores_reply():
+    messages = [
+        build_message(1, "alice", "Need release plan for deploy today?", "2026-05-28T10:00:00+03:00"),
+        build_message(2, "bob", "Yes, deploy after config fix", "2026-05-28T10:02:00+03:00"),
+    ]
+    session = FakeDeepSeekSession(
+        "Topics:\n- release\n\nNotable:\n- [10:00] participant_01: Need release plan for deploy today?\n- [10:02] participant_02: Yes, deploy after config fix"
+    )
+    service = SummaryService(
+        FakeChatHistoryService(messages),
+        backend="deepseek",
+        deepseek_api_key="secret",
+        deepseek_model="deepseek-chat",
+        deepseek_base_url="https://api.deepseek.com",
+        deepseek_summary_usage_repository=FakeDeepSeekSummaryUsageRepository(),
+        requests_session=session,
+    )
+
+    prepared_messages = service.prepare_messages(messages)
+    summary = service.request_deepseek_summary(prepared_messages)
+    prompt = session.last_request["json"]["messages"][1]["content"]
+
+    assert "alice" not in prompt
+    assert "bob" not in prompt
+    assert "[10:00] participant_01: Need release plan for deploy today?" in prompt
+    assert "[10:02] participant_02: Yes, deploy after config fix" in prompt
+    assert "participant_01" not in summary
+    assert "participant_02" not in summary
+    assert "[10:00] alice: Need release plan for deploy today?" in summary
+    assert "[10:02] bob: Yes, deploy after config fix" in summary
+
+
 def test_factcheck_claim_uses_deepseek_when_configured():
     session = FakeDeepSeekSession("Вердикт: скорее да\nПочему:\n- утверждение противоречит известным фактам")
     service = SummaryService(

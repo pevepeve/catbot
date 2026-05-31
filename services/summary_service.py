@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -494,8 +494,10 @@ class SummaryService:
         return payload["choices"][0]["message"]["content"]
 
     def request_deepseek_summary(self, prepared_messages: list[PreparedSummaryMessage]) -> str:
-        prompt = self.build_deepseek_prompt(prepared_messages)
-        return self.request_deepseek_chat(build_summary_system_prompt(), prompt)
+        anonymized_messages, speaker_placeholders = self.anonymize_speakers(prepared_messages)
+        prompt = self.build_deepseek_prompt(anonymized_messages)
+        summary = self.request_deepseek_chat(build_summary_system_prompt(), prompt)
+        return self.restore_speaker_names(summary, speaker_placeholders)
 
     def request_deepseek_factcheck(self, claim_text: str) -> str:
         return self.request_deepseek_chat(
@@ -523,6 +525,37 @@ class SummaryService:
     def build_deepseek_prompt(cls, prepared_messages: list[PreparedSummaryMessage]) -> str:
         transcript = cls.build_transcript_for_llm(prepared_messages)
         return build_summary_user_prompt(transcript)
+
+    @staticmethod
+    def build_speaker_placeholder(index: int) -> str:
+        return f"participant_{index:02d}"
+
+    @classmethod
+    def anonymize_speakers(
+        cls,
+        prepared_messages: list[PreparedSummaryMessage],
+    ) -> tuple[list[PreparedSummaryMessage], dict[str, str]]:
+        speaker_to_placeholder: dict[str, str] = {}
+        placeholder_to_speaker: dict[str, str] = {}
+        anonymized_messages: list[PreparedSummaryMessage] = []
+
+        for message in prepared_messages:
+            placeholder = speaker_to_placeholder.get(message.speaker)
+            if placeholder is None:
+                placeholder = cls.build_speaker_placeholder(len(speaker_to_placeholder) + 1)
+                speaker_to_placeholder[message.speaker] = placeholder
+                placeholder_to_speaker[placeholder] = message.speaker
+
+            anonymized_messages.append(replace(message, speaker=placeholder))
+
+        return anonymized_messages, placeholder_to_speaker
+
+    @staticmethod
+    def restore_speaker_names(summary: str, speaker_placeholders: dict[str, str]) -> str:
+        restored_summary = summary
+        for placeholder, speaker in speaker_placeholders.items():
+            restored_summary = restored_summary.replace(placeholder, speaker)
+        return restored_summary
 
     @staticmethod
     def normalize_text(text: str) -> str:
