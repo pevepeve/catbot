@@ -112,7 +112,7 @@ You can also start immediately after setup with:
 
 ## Deploy On Ubuntu 18.04.5 LTS
 
-Ubuntu 18.04 ships with Python 3.6, which is too old for this project. The deploy script installs Python 3.11 from `ppa:deadsnakes/ppa`, creates `.venv`, installs dependencies, creates `media`, and copies `.env.example` to `.env` if needed.
+Ubuntu 18.04 ships with Python 3.6, which is too old for this project. The deploy script first looks for an already-installed supported Python such as `python3.12` or `python3.11`. If none is found, it tries to install Python 3.11 from `ppa:deadsnakes/ppa`. If those packages are unavailable on that host, it falls back to building Python 3.11 locally inside the project, then creates `.venv`, installs dependencies, creates `media`, and copies `.env.example` to `.env` if needed.
 
 1. Copy the `catbot` folder to the target machine.
 2. Open a terminal in that folder.
